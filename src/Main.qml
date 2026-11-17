@@ -1031,6 +1031,7 @@ ApplicationWindow {
             { keys: "Enter", action: qsTr("Write on the selected shape") },
             { keys: "1 – 8", action: qsTr("Color the selection") },
             { keys: "Alt", action: qsTr("Hold and drag a handle to rotate the shape") },
+            { keys: "Shift", action: qsTr("Hold while drawing a line to keep it straight") },
             { keys: ",  .", action: qsTr("Rotate the selection") },
             { keys: "Delete", action: qsTr("Delete the selection") },
             { keys: "Ctrl+C · Ctrl+V", action: qsTr("Copy and paste") },

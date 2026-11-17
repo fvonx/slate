@@ -15,6 +15,7 @@
 
 #include <QSignalSpy>
 #include <QWheelEvent>
+#include <functional>
 #include <cmath>
 
 #include "backend.h"
@@ -1049,6 +1050,50 @@ private slots:
         drag({100, 400}, {300, 450});
         QCOMPARE(board->items().at(2).kind, QString("line"));
         QCOMPARE(board->items().at(2).w, 200.0);
+
+        // With Shift held a line keeps straight: level, upright, or on a
+        // diagonal, whichever is nearest, and the angle shows as it is drawn.
+        // QTest's moves carry no modifiers, so these are sent by hand.
+        auto shiftDrag = [&](QPoint from, const QList<QPoint> &path, std::function<void()> during = {}) {
+            QTest::mousePress(window, Qt::LeftButton, Qt::ShiftModifier, from);
+            for (const QPoint &to : path) {
+                QMouseEvent move(QEvent::MouseMove, to, to, window->mapToGlobal(to), Qt::NoButton, Qt::LeftButton,
+                                 Qt::ShiftModifier);
+                QCoreApplication::sendEvent(window, &move);
+            }
+            if (during)
+                during();
+            QTest::mouseRelease(window, Qt::LeftButton, Qt::ShiftModifier, path.last());
+        };
+        auto *lineAngle = window->findChild<QQuickItem *>("angleLabel");
+        QTest::keyClick(window, Qt::Key_L);
+        shiftDrag({100, 500}, {{140, 505}, {200, 507}, {300, 512}}, [&] {
+            QVERIFY(lineAngle->isVisible());
+            QCOMPARE(lineAngle->property("text").toString(), QString("0°"));
+        });
+        const BoardItem level = board->items().last();
+        QCOMPARE(level.kind, QString("line"));
+        QCOMPARE(level.w, 200.0);
+        QCOMPARE(level.h, 0.0);
+        QVERIFY(!lineAngle->isVisible());
+        QTest::keyClick(window, Qt::Key_L);
+        shiftDrag({600, 500}, {{610, 480}, {630, 430}, {650, 420}});
+        const BoardItem diagonal = board->items().last();
+        QVERIFY(std::abs(diagonal.w + diagonal.h) < 1e-9);
+        QVERIFY(diagonal.w > 60);
+        // Its end, dragged with Shift, keeps it straight too: now upright.
+        const QPoint diagonalEnd = (QPointF(diagonal.x + diagonal.w, diagonal.y + diagonal.h) + origin).toPoint();
+        shiftDrag(diagonalEnd, {diagonalEnd + QPoint(5, -10), diagonalEnd + QPoint(-60, -40),
+                                diagonalEnd + QPoint(-63, -60)});
+        QVERIFY(std::abs(board->find(diagonal.id)->w) < 1e-9);
+        QVERIFY(board->find(diagonal.id)->h < -100);
+        // Without Shift it goes where it is put.
+        QTest::keyClick(window, Qt::Key_L);
+        drag({100, 560}, {300, 571});
+        QCOMPARE(board->items().last().h, 11.0);
+        for (int i = 0; i < 4; ++i)
+            QTest::keySequence(window, QKeySequence::Undo);
+        QCOMPARE(board->count(), 3);
 
         // C, then a drag from one shape to the other, connects them.
         QTest::keyClick(window, Qt::Key_C);

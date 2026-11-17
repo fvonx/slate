@@ -38,6 +38,9 @@ Item {
     property real startAngle: 0
     property bool altHeld: false
     property bool rotateCaught: false
+    // The angle shown beside the pointer while something is turned or a
+    // line is drawn, and whether it has caught on a step.
+    property real shownAngle: 0
     property point grabOffset
     property point startA
     property point startB
@@ -267,6 +270,25 @@ Item {
         const cx = (l + r) / 2, cy = (t + bt) / 2
         return [spin(cx, t - o, cx, cy, hoverRotation), spin(r + o, cy, cx, cy, hoverRotation),
                 spin(cx, bt + o, cx, cy, hoverRotation), spin(l - o, cy, cx, cy, hoverRotation)]
+    }
+
+    // Where a line from `from` to the pointer ends. With Shift held it is
+    // kept to every eighth of a turn (level, upright, or a diagonal), the
+    // end sliding along that direction as the pointer moves. Answers the
+    // end, and the line's angle as it reads on screen: 0 level, 90 upright.
+    function lineEnd(from, to, straight) {
+        let end = to
+        if (straight) {
+            const step = Math.PI / 4
+            const dir = Math.round(Math.atan2(to.y - from.y, to.x - from.x) / step) * step
+            const ux = Math.cos(dir), uy = Math.sin(dir)
+            const length = (to.x - from.x) * ux + (to.y - from.y) * uy
+            // Level and upright lines come out exact, not a hair off.
+            end = Qt.point(from.x + Math.round(ux * 1e6) / 1e6 * length,
+                           from.y + Math.round(uy * 1e6) / 1e6 * length)
+        }
+        const degrees = -Math.atan2(end.y - from.y, end.x - from.x) * 180 / Math.PI
+        return { x: end.x, y: end.y, angle: ((Math.round(degrees) % 180) + 180) % 180 }
     }
 
     function nearest(list, p, reach) {
@@ -513,7 +535,10 @@ Item {
                 drawId = board.add(tool, pressWorld.x, pressWorld.y, 0, 0)
             let w = p.x - pressWorld.x, h = p.y - pressWorld.y
             if (tool === "line") {
-                board.setGeometry(drawId, pressWorld.x, pressWorld.y, w, h)
+                const end = lineEnd(pressWorld, p, shift)
+                board.setGeometry(drawId, pressWorld.x, pressWorld.y, end.x - pressWorld.x, end.y - pressWorld.y)
+                shownAngle = end.angle
+                rotateCaught = shift
             } else {
                 // Shift keeps it square, or a true circle.
                 if (shift) {
@@ -592,13 +617,19 @@ Item {
             }
             rotateCaught = caught
             board.setRotation(board.selectedId, caught ? angle : Math.round(angle * 100) / 100)
+            shownAngle = board.selectedRotation
         } else if (mode === "endpoint") {
             if (first)
                 board.checkpoint()
+            // The end held turns about the other one, kept straight with Shift.
+            const fixed = activeHandle.end === 0 ? startB : startA
+            const end = lineEnd(fixed, p, shift)
             if (activeHandle.end === 0)
-                board.setGeometry(board.selectedId, p.x, p.y, startB.x - p.x, startB.y - p.y)
+                board.setGeometry(board.selectedId, end.x, end.y, fixed.x - end.x, fixed.y - end.y)
             else
-                board.setGeometry(board.selectedId, startA.x, startA.y, p.x - startA.x, p.y - startA.y)
+                board.setGeometry(board.selectedId, fixed.x, fixed.y, end.x - fixed.x, end.y - fixed.y)
+            shownAngle = end.angle
+            rotateCaught = shift
         } else if (mode === "connect") {
             const id = board.shapeAt(p.x, p.y, 0)
             targetId = id === sourceId ? 0 : id
@@ -937,7 +968,8 @@ Item {
     // lit when it has caught on an angle.
     Rectangle {
         objectName: "angle"
-        visible: view.mode === "rotate" && view.moved
+        visible: view.moved && (view.mode === "rotate" || view.mode === "endpoint"
+                                || (view.mode === "draw" && view.tool === "line"))
         x: Math.min(view.pointer.x + 18, view.width - width - 8)
         y: Math.min(view.pointer.y + 18, view.height - height - 8)
         width: angleLabel.implicitWidth + 16
@@ -952,7 +984,7 @@ Item {
             color: view.rotateCaught ? theme.accentForeground : theme.foreground
             font.pixelSize: 13
             // Reads the language, so the number is written anew on a switch.
-            text: translator.language, qsTr("%1°").arg(Math.round(board.selectedRotation).toLocaleString(Qt.locale(), 'f', 0))
+            text: translator.language, qsTr("%1°").arg(Math.round(view.shownAngle).toLocaleString(Qt.locale(), 'f', 0))
         }
     }
 
