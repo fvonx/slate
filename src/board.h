@@ -46,6 +46,7 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(QPointF selectionStart READ selectionStart NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QPointF selectionEnd READ selectionEnd NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString color READ color NOTIFY colorChanged)
+    Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
     Q_PROPERTY(bool hasView READ hasView NOTIFY loaded)
@@ -76,6 +77,9 @@ public:
     QPointF selectionStart() const;
     QPointF selectionEnd() const;
     QString color() const { return m_color; }
+    // The color the color menu marks: that of what is selected, when it all
+    // has one ("mixed" when it doesn't), or the one new shapes will take.
+    QString shownColor() const;
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
     bool hasView() const { return m_hasView; }
@@ -145,6 +149,7 @@ signals:
     void selectionChanged();
     void selectionGeometryChanged();
     void colorChanged();
+    void shownColorChanged();
     void undoChanged();
     // A board was opened: the window takes its saved view.
     void loaded();

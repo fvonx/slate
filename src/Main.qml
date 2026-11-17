@@ -427,8 +427,19 @@ ApplicationWindow {
                         width: 20
                         height: 20
                         radius: 10
-                        color: board.color ? theme.colors[board.color] : "transparent"
-                        border.color: board.color ? "transparent" : theme.foreground
+                        // What is selected, or what new shapes will take;
+                        // a selection of several colors shows as a dash.
+                        readonly property string shown: board.shownColor
+                        readonly property bool mixed: shown === "mixed"
+                        color: shown && !mixed ? theme.colors[shown] : "transparent"
+                        border.color: shown && !mixed ? "transparent" : theme.foreground
+                        Rectangle {
+                            visible: parent.mixed
+                            anchors.centerIn: parent
+                            width: 8
+                            height: 2
+                            color: theme.foreground
+                        }
                         border.width: 2
                     }
                     Shape {
@@ -480,7 +491,7 @@ ApplicationWindow {
                                     id: swatch
                                     required property string modelData
                                     required property int index
-                                    readonly property bool current: board.color === modelData
+                                    readonly property bool current: board.shownColor === modelData
                                     objectName: "color-" + (modelData || "none")
                                     Layout.preferredWidth: 76
                                     Layout.preferredHeight: 32

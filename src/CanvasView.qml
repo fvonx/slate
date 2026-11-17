@@ -205,12 +205,25 @@ Item {
         editBox = Qt.rect(it.x, it.y, it.w, it.h)
         editRotation = it.rotation
         editor.font.pixelSize = it.kind === "text" ? it.fontSize : 18
-        editor.color = it.kind === "text" ? inkOf(it.color)
-                     : it.kind === "postit" ? readable(paperOf(it.color)) : theme.foreground
         editor.text = it.text
         editingId = id
+        recolorEditor()
         editor.forceActiveFocus()
         editor.selectAll()
+    }
+
+    // The words being typed take the color of what they are written on,
+    // and change with it when it is recolored mid-sentence.
+    function recolorEditor() {
+        if (!editing)
+            return
+        const it = board.item(editingId)
+        editor.color = it.kind === "text" ? inkOf(it.color)
+                     : it.kind === "postit" ? readable(paperOf(it.color)) : theme.foreground
+    }
+    Connections {
+        target: board
+        function onShownColorChanged() { view.recolorEditor() }
     }
 
     function commitEdit() {
@@ -916,6 +929,7 @@ Item {
 
         TextEdit {
             id: editor
+            objectName: "editor"
             z: 10
             visible: view.editing
             readonly property bool note: view.editingKind === "text"

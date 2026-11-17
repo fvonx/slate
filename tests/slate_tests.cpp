@@ -498,6 +498,50 @@ private slots:
         QCOMPARE(board.find(board.add("ellipse", 0, 0, 10, 10))->color, QString("blue"));
         board.setSelectionColor("#123456");
         QCOMPARE(board.color(), QString());
+
+        // The menu marks the color of what is selected, not the one new
+        // shapes take, and says when the selection has more than one.
+        Board marked;
+        QSignalSpy shown(&marked, &Board::shownColorChanged);
+        const int red = marked.add("rect", 0, 0, 10, 10);
+        marked.setSelectionColor("red");
+        const int green = marked.add("rect", 20, 0, 10, 10);
+        marked.setSelectionColor("green");
+        QCOMPARE(marked.color(), QString("green"));
+        marked.selectOnly(red);
+        QCOMPARE(marked.shownColor(), QString("red"));
+        QVERIFY(shown.count() > 0);
+        marked.toggle(green);
+        QCOMPARE(marked.shownColor(), QString("mixed"));
+        marked.setSelectionColor("blue");
+        QCOMPARE(marked.shownColor(), QString("blue"));
+        // With nothing selected it is the color new shapes will take.
+        marked.clearSelection();
+        QCOMPARE(marked.shownColor(), QString("blue"));
+        marked.setSelectionColor("");
+        marked.selectOnly(red);
+        QCOMPARE(marked.shownColor(), QString("blue"));
+        marked.undo();
+        // Undoing the recolor brings the red back, and the menu with it.
+        QCOMPARE(marked.shownColor(), QString("red"));
+
+        // A post-it is yellow paper unless it is given another color, and is
+        // marked as yellow, never as having none: when it is made, when "no
+        // color" is picked for it, and when a board saved before it was
+        // stored that way is opened.
+        Board notes;
+        const int note = notes.add("postit", 0, 0, 100, 100);
+        QCOMPARE(notes.find(note)->color, QString("yellow"));
+        QCOMPARE(notes.shownColor(), QString("yellow"));
+        notes.setSelectionColor("green");
+        notes.setSelectionColor("");
+        QCOMPARE(notes.find(note)->color, QString("yellow"));
+        const int plain = notes.add("rect", 200, 0, 50, 50);
+        QCOMPARE(notes.find(plain)->color, QString());
+        notes.load(QJsonObject{{"items", QJsonArray{QJsonObject{{"id", 1}, {"kind", "postit"}, {"x", 0}, {"y", 0},
+                                                                {"w", 100}, {"h", 100}}}}});
+        notes.selectOnly(1);
+        QCOMPARE(notes.shownColor(), QString("yellow"));
     }
 
     void boardsSurviveARestart() {
@@ -1157,6 +1201,25 @@ private slots:
         QTest::keyClick(window, Qt::Key_Escape);
         QCOMPARE(board->items().last().text, QString("hello"));
         QTRY_VERIFY(board->items().last().w > 20);
+
+        // Clicked, text is selected and its color marked; recolored while it
+        // is being written, the words being typed change color with it.
+        const int words = board->items().last().id;
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTest::mouseClick(window, Qt::LeftButton, {}, {710, 500});
+        QCOMPARE(board->selectedId(), words);
+        QCOMPARE(board->shownColor(), board->find(words)->color);
+        board->setSelectionColor("orange");
+        QCOMPARE(board->shownColor(), QString("orange"));
+        QTest::mouseDClick(window, Qt::LeftButton, {}, {710, 500});
+        QTRY_VERIFY(view->property("editing").toBool());
+        auto *editor = view->findChild<QQuickItem *>("editor");
+        QCOMPARE(editor->property("color").value<QColor>(), theme.colors().value("orange").value<QColor>());
+        board->setSelectionColor("cyan");
+        QCOMPARE(editor->property("color").value<QColor>(), theme.colors().value("cyan").value<QColor>());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCOMPARE(board->find(words)->color, QString("cyan"));
+        board->setSelectionColor("");
         QTest::mouseDClick(window, Qt::LeftButton, {}, {900, 300});
         QTRY_VERIFY(view->property("editing").toBool());
         QCOMPARE(board->count(), 6);
@@ -1305,6 +1368,24 @@ private slots:
         QTRY_VERIFY(!colorMenu->property("visible").toBool());
         QTest::keyClick(window, Qt::Key_2);
         QCOMPARE(board->find(postit)->color, QString("red"));
+
+        // Selecting a shape marks its color in the menu: a blue one, then the
+        // red post-it, whatever was picked last.
+        const int blue = board->add("rect", 2000, 2000, 50, 50);
+        board->setSelectionColor("blue");
+        board->selectOnly(blue);
+        QTest::mouseClick(window, Qt::LeftButton, {}, colorButton->mapToScene({21, 21}).toPoint());
+        QTRY_VERIFY(colorMenu->property("opened").toBool());
+        auto *menuContent = colorMenu->property("contentItem").value<QQuickItem *>();
+        QVERIFY(visualChild(menuContent, "color-blue")->property("current").toBool());
+        QVERIFY(!visualChild(menuContent, "color-red")->property("current").toBool());
+        board->selectOnly(postit);
+        QVERIFY(visualChild(menuContent, "color-red")->property("current").toBool());
+        QVERIFY(!visualChild(menuContent, "color-blue")->property("current").toBool());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!colorMenu->property("visible").toBool());
+        board->removeItem(blue);
+        board->selectOnly(postit);
 
         // Alt and an arrow lines the selection up on that side.
         QTest::keySequence(window, QKeySequence::SelectAll);

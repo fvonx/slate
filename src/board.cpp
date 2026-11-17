@@ -58,6 +58,13 @@ double normalized(double degrees) {
     return degrees;
 }
 
+// The color a thing of a kind takes for a color key. A post-it is never
+// without one: it is paper, yellow unless it is something else, so it is
+// stored as yellow and the menu marks it so.
+QString colorFor(const QString &kind, const QString &key) {
+    return key.isEmpty() && kind == QLatin1String("postit") ? QStringLiteral("yellow") : key;
+}
+
 BoardItem itemFromJson(const QJsonObject &o) {
     BoardItem item;
     item.id = o.value("id").toInt();
@@ -70,6 +77,7 @@ BoardItem itemFromJson(const QJsonObject &o) {
     item.color = o.value("color").toString();
     if (!palette().contains(item.color))
         item.color.clear();
+    item.color = colorFor(item.kind, item.color);
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
@@ -160,7 +168,32 @@ double distanceToSegment(const QPointF &p, const QLineF &l) {
 
 } // namespace
 
-Board::Board(QObject *parent) : QAbstractListModel(parent) {}
+Board::Board(QObject *parent) : QAbstractListModel(parent) {
+    // What the menu marks follows the selection, the colors of what is in
+    // it, and the color picked for new shapes.
+    QObject::connect(this, &Board::selectionChanged, this, &Board::shownColorChanged);
+    QObject::connect(this, &Board::colorChanged, this, &Board::shownColorChanged);
+    QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::shownColorChanged);
+    QObject::connect(this, &QAbstractItemModel::dataChanged, this,
+                     [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
+                         if (roles.isEmpty() || roles.contains(FillRole))
+                             emit shownColorChanged();
+                     });
+}
+
+QString Board::shownColor() const {
+    QString shown;
+    bool any = false;
+    for (const BoardItem &item : m_items) {
+        if (!m_selected.contains(item.id) || item.isConnector())
+            continue;
+        if (any && item.color != shown)
+            return QStringLiteral("mixed");
+        shown = item.color;
+        any = true;
+    }
+    return any ? shown : m_color;
+}
 
 int Board::rowCount(const QModelIndex &parent) const {
     return parent.isValid() ? 0 : m_items.size();
@@ -303,7 +336,7 @@ int Board::add(const QString &kind, double x, double y, double w, double h) {
     item.y = y;
     item.w = w;
     item.h = h;
-    item.color = m_color;
+    item.color = colorFor(kind, m_color);
     const int id = insert(item);
     setSelection({id});
     return id;
@@ -533,15 +566,15 @@ void Board::setSelectionColor(const QString &color) {
     }
     bool any = false;
     for (const BoardItem &item : m_items)
-        any = any || (m_selected.contains(item.id) && !item.isConnector() && item.color != key);
+        any = any || (m_selected.contains(item.id) && !item.isConnector() && item.color != colorFor(item.kind, key));
     if (!any)
         return;
     checkpoint();
     for (int i = 0; i < m_items.size(); ++i) {
         BoardItem &item = m_items[i];
-        if (!m_selected.contains(item.id) || item.isConnector() || item.color == key)
+        if (!m_selected.contains(item.id) || item.isConnector() || item.color == colorFor(item.kind, key))
             continue;
-        item.color = key;
+        item.color = colorFor(item.kind, key);
         emit dataChanged(index(i), index(i), {FillRole});
     }
     emit changed();
