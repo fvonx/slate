@@ -1,0 +1,1170 @@
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Controls.Material
+import QtQuick.Layouts
+import QtQuick.Shapes
+
+ApplicationWindow {
+    id: win
+    width: 1200
+    height: 800
+    minimumWidth: 640
+    minimumHeight: 460
+    visible: true
+    title: "Slate"
+    color: theme.background
+
+    Material.theme: theme.light ? Material.Light : Material.Dark
+    Material.accent: theme.accent
+    Material.background: theme.background
+    Material.foreground: theme.foreground
+
+    readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
+    // Bare keys belong to whatever is being typed into.
+    readonly property bool typing: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
+    readonly property bool keys: !typing && !help.visible && !confirm.visible
+    readonly property color panel: Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.05))
+    readonly property var swatches: ["", "red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
+
+    // The shapes share one toolbar button, which shows the one last drawn.
+    readonly property var shapes: [
+        { tool: "rect", key: "R", label: qsTr("Rectangle"), icon: "M3 4.5 H17 V15.5 H3 Z" },
+        { tool: "ellipse", key: "O", label: qsTr("Circle"), icon: "M10 3 A7 7 0 1 0 10 17 A7 7 0 1 0 10 3 Z" },
+        { tool: "triangle", key: "T", label: qsTr("Triangle"), icon: "M10 3 L17.5 16.5 H2.5 Z" },
+        { tool: "line", key: "L", label: qsTr("Line"), icon: "M3 17 L17 3" }
+    ]
+    property string lastShape: "rect"
+    readonly property var shownShape: shapes.find(shape => shape.tool === lastShape)
+    readonly property bool drawingShape: shapes.some(shape => shape.tool === view.tool)
+
+    Connections {
+        target: view
+        function onToolChanged() {
+            if (win.drawingShape)
+                win.lastShape = view.tool
+        }
+    }
+
+    property string renamingId: ""
+
+    function nudge(dx, dy) {
+        if (board.selectionCount === 0)
+            return
+        board.checkpoint()
+        board.moveSelection(dx, dy)
+    }
+
+    function paint(index) { board.setSelectionColor(swatches[index]) }
+
+    // Saves the board in Downloads, drawn as it is here, and says where.
+    property string notice: ""
+    property bool noticeFailed: false
+    function download(format) {
+        const result = backend.exportBoard(format, theme.colors, theme.background, theme.foreground,
+                                           theme.light, theme.radius)
+        noticeFailed = !result.ok
+        notice = result.path
+        noticeTimer.restart()
+    }
+    Timer {
+        id: noticeTimer
+        interval: 5000
+        onTriggered: win.notice = ""
+    }
+
+    function askToDelete(id, name) {
+        confirm.boardId = id
+        confirm.boardName = name
+        confirm.open()
+    }
+
+    Shortcut { sequence: "?"; enabled: !win.typing && !confirm.visible; onActivated: help.opened ? help.close() : help.open() }
+    Shortcut { sequence: "Q"; enabled: win.keys; onActivated: Qt.quit() }
+
+    Shortcut { sequence: "V"; enabled: win.keys; onActivated: view.tool = "select" }
+    Shortcut { sequence: "R"; enabled: win.keys; onActivated: view.tool = "rect" }
+    Shortcut { sequence: "O"; enabled: win.keys; onActivated: view.tool = "ellipse" }
+    // T is the triangle, and pressed again, text.
+    Shortcut { sequence: "T"; enabled: win.keys; onActivated: view.tool = view.tool === "triangle" ? "text" : "triangle" }
+    Shortcut { sequence: "X"; enabled: win.keys; onActivated: view.tool = "text" }
+    Shortcut { sequence: "L"; enabled: win.keys; onActivated: view.tool = "line" }
+    Shortcut { sequence: "P"; enabled: win.keys; onActivated: view.tool = "postit" }
+    Shortcut { sequence: ","; enabled: win.keys; onActivated: board.rotateSelection(-15) }
+    Shortcut { sequence: "."; enabled: win.keys; onActivated: board.rotateSelection(15) }
+    Shortcut { sequence: "C"; enabled: win.keys; onActivated: view.tool = "connect" }
+    Shortcut {
+        sequence: "Escape"
+        enabled: win.keys && !colorMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible
+        onActivated: {
+            if (view.tool !== "select")
+                view.tool = "select"
+            else
+                board.clearSelection()
+        }
+    }
+
+    Shortcut { sequences: ["Return", "Enter"]; enabled: win.keys; onActivated: if (board.selectedId) view.beginEdit(board.selectedId) }
+    Shortcut { sequences: ["Delete", "Backspace"]; enabled: win.keys; onActivated: board.removeSelection() }
+    Shortcut { sequences: [StandardKey.SelectAll]; enabled: win.keys; onActivated: board.selectAll() }
+    Shortcut { sequences: [StandardKey.Copy]; enabled: win.keys; onActivated: board.copy() }
+    Shortcut {
+        sequences: [StandardKey.Paste]
+        enabled: win.keys
+        onActivated: {
+            const p = view.insertPoint()
+            board.paste(p.x, p.y)
+        }
+    }
+    Shortcut {
+        sequence: "Ctrl+D"
+        enabled: win.keys
+        onActivated: {
+            const p = view.insertPoint()
+            board.duplicate(p.x, p.y, view.pointerInside)
+        }
+    }
+    Shortcut { sequences: [StandardKey.Undo]; enabled: win.keys; onActivated: board.undo() }
+    Shortcut { sequences: [StandardKey.Redo]; enabled: win.keys; onActivated: board.redo() }
+
+    Shortcut { sequence: "Left"; enabled: win.keys; onActivated: win.nudge(-1, 0) }
+    Shortcut { sequence: "Right"; enabled: win.keys; onActivated: win.nudge(1, 0) }
+    Shortcut { sequence: "Up"; enabled: win.keys; onActivated: win.nudge(0, -1) }
+    Shortcut { sequence: "Down"; enabled: win.keys; onActivated: win.nudge(0, 1) }
+    Shortcut { sequence: "Alt+Left"; enabled: win.keys; onActivated: board.alignSelection("left") }
+    Shortcut { sequence: "Alt+Right"; enabled: win.keys; onActivated: board.alignSelection("right") }
+    Shortcut { sequence: "Alt+Up"; enabled: win.keys; onActivated: board.alignSelection("top") }
+    Shortcut { sequence: "Alt+Down"; enabled: win.keys; onActivated: board.alignSelection("bottom") }
+    Shortcut { sequence: "Alt+H"; enabled: win.keys; onActivated: board.alignSelection("center") }
+    Shortcut { sequence: "Alt+V"; enabled: win.keys; onActivated: board.alignSelection("middle") }
+    Shortcut { sequence: "]"; enabled: win.keys; onActivated: board.bringToFront() }
+    Shortcut { sequence: "["; enabled: win.keys; onActivated: board.sendToBack() }
+    Shortcut { sequence: "Shift+Left"; enabled: win.keys; onActivated: win.nudge(-10, 0) }
+    Shortcut { sequence: "Shift+Right"; enabled: win.keys; onActivated: win.nudge(10, 0) }
+    Shortcut { sequence: "Shift+Up"; enabled: win.keys; onActivated: win.nudge(0, -10) }
+    Shortcut { sequence: "Shift+Down"; enabled: win.keys; onActivated: win.nudge(0, 10) }
+
+    Shortcut { sequences: ["+", "="]; enabled: win.keys; onActivated: view.zoomAt(view.focusPoint(), 1.25, true) }
+    Shortcut { sequence: "-"; enabled: win.keys; onActivated: view.zoomAt(view.focusPoint(), 0.8, true) }
+    Shortcut { sequence: "0"; enabled: win.keys; onActivated: view.resetZoom() }
+    Shortcut { sequence: "F"; enabled: win.keys; onActivated: view.fit() }
+
+    Shortcut { sequence: "1"; enabled: win.keys; onActivated: win.paint(0) }
+    Shortcut { sequence: "2"; enabled: win.keys; onActivated: win.paint(1) }
+    Shortcut { sequence: "3"; enabled: win.keys; onActivated: win.paint(2) }
+    Shortcut { sequence: "4"; enabled: win.keys; onActivated: win.paint(3) }
+    Shortcut { sequence: "5"; enabled: win.keys; onActivated: win.paint(4) }
+    Shortcut { sequence: "6"; enabled: win.keys; onActivated: win.paint(5) }
+    Shortcut { sequence: "7"; enabled: win.keys; onActivated: win.paint(6) }
+    Shortcut { sequence: "8"; enabled: win.keys; onActivated: win.paint(7) }
+
+    Shortcut { sequence: "B"; enabled: win.keys; onActivated: boardMenu.visible ? boardMenu.close() : boardMenu.open() }
+    Shortcut { sequence: "Ctrl+N"; enabled: win.keys; onActivated: backend.newBoard() }
+    Shortcut { sequence: "Ctrl+Tab"; enabled: win.keys; onActivated: backend.next() }
+    Shortcut { sequence: "Ctrl+Shift+Tab"; enabled: win.keys; onActivated: backend.previous() }
+    Shortcut {
+        sequence: "F2"
+        enabled: win.keys
+        onActivated: {
+            boardMenu.open()
+            win.renamingId = backend.currentId
+        }
+    }
+
+    // Right-to-left languages mirror the window; the Translator sets the
+    // application's layout direction. The canvas itself is placed by
+    // coordinates and stays as it was drawn.
+    Item {
+        anchors.fill: parent
+        LayoutMirroring.enabled: win.rightToLeft
+        LayoutMirroring.childrenInherit: true
+
+        CanvasView {
+            id: view
+            objectName: "view"
+            anchors.fill: parent
+        }
+
+        Label {
+            objectName: "hint"
+            visible: board.count === 0
+            anchors.centerIn: parent
+            width: Math.min(parent.width - 48, 520)
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
+            color: theme.colors.muted
+            font.pixelSize: 16
+            text: qsTr("Press R, O, T or L and drag to draw. Double-click to write. Press ? for every shortcut.")
+        }
+
+        // A save that failed is said, not hidden.
+        Rectangle {
+            visible: backend.saveError !== ""
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.topMargin: 16
+            width: Math.min(parent.width - 32, errorLabel.implicitWidth + 32)
+            height: errorLabel.implicitHeight + 16
+            radius: theme.radius
+            color: theme.colors.red
+            Label {
+                id: errorLabel
+                anchors.centerIn: parent
+                width: parent.width - 32
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                color: "black"
+                text: qsTr("Could not save this board to %1").arg(backend.saveError)
+            }
+        }
+
+        // The tools, and the colors.
+        Rectangle {
+            id: toolbar
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottomMargin: 20
+            width: tools.implicitWidth + 16
+            height: tools.implicitHeight + 16
+            // A window tiled narrow still shows every tool.
+            scale: Math.min(1, (parent.width - 24) / width)
+            transformOrigin: Item.Bottom
+            radius: theme.radius
+            color: win.panel
+            border.color: theme.colors.selection
+
+            // Clicks on the bar don't fall through to the canvas.
+            MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; onWheel: (wheel) => wheel.accepted = true }
+
+            RowLayout {
+                id: tools
+                anchors.centerIn: parent
+                spacing: 4
+
+                Repeater {
+                    model: [
+                        { tool: "select", key: "V", tip: qsTr("Select and move"),
+                          icon: "M4 2 L4 16 L8 12.5 L10.5 18 L12.5 17 L10 11.5 L15 11.5 Z" },
+                        { tool: "shapes", shapes: true, tip: qsTr("Shapes") },
+                        { tool: "postit", key: "P", tip: qsTr("Post-it"),
+                          icon: "M3 3 H17 V12 L12 17 H3 Z M17 12 H12 V17" },
+                        { tool: "text", key: "X", tip: qsTr("Text"),
+                          icon: "M4 5.5 V3.5 H16 V5.5 M10 3.5 V16.5 M7.5 16.5 H12.5" },
+                        { tool: "connect", key: "C", tip: qsTr("Connect two shapes"),
+                          icon: "M2 3 H8 V8 H2 Z M12 12 H18 V17 H12 Z M8 5.5 H15 V12" }
+                    ]
+                    delegate: Rectangle {
+                        id: toolButton
+                        required property var modelData
+                        // One entry stands for all the shapes, and opens their menu.
+                        readonly property bool menu: modelData.shapes === true
+                        readonly property bool active: menu ? win.drawingShape : view.tool === modelData.tool
+                        readonly property string icon: menu ? win.shownShape.icon : modelData.icon
+                        objectName: "tool-" + modelData.tool
+                        Component.onCompleted: if (menu) shapeMenu.parent = toolButton
+                        Layout.preferredWidth: 42
+                        Layout.preferredHeight: 42
+                        radius: Math.min(4, theme.radius)
+                        color: active ? theme.accent
+                             : toolHover.hovered || (menu && shapeMenu.visible) ? theme.colors.selection : "transparent"
+
+                        Shape {
+                            visible: toolButton.menu
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.rightMargin: 4
+                            width: 8
+                            height: 6
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: toolButton.active ? theme.accentForeground : theme.foreground
+                                strokeWidth: 1.4
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+                                PathSvg { path: "M1 4.5 L4 1.5 L7 4.5" }
+                            }
+                        }
+                        Shape {
+                            anchors.centerIn: parent
+                            anchors.horizontalCenterOffset: toolButton.menu ? -4 : 0
+                            width: 20
+                            height: 20
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: toolButton.active ? theme.accentForeground : theme.foreground
+                                strokeWidth: 1.6
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+                                PathSvg { path: toolButton.icon }
+                            }
+                        }
+                        Label {
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.rightMargin: 4
+                            anchors.bottomMargin: 1
+                            text: toolButton.menu ? win.shownShape.key : toolButton.modelData.key
+                            font.pixelSize: 9
+                            opacity: 0.6
+                            color: toolButton.active ? theme.accentForeground : theme.foreground
+                        }
+                        HoverHandler { id: toolHover }
+                        TapHandler {
+                            onTapped: {
+                                if (!toolButton.menu)
+                                    view.tool = toolButton.modelData.tool
+                                else if (shapeMenu.visible)
+                                    shapeMenu.close()
+                                else
+                                    shapeMenu.open()
+                            }
+                        }
+                        ToolTip.visible: toolHover.hovered && !(menu && shapeMenu.visible)
+                        ToolTip.delay: 500
+                        ToolTip.text: modelData.tip
+                    }
+                }
+
+                // The shapes' menu; its button above takes it as its own.
+                Popup {
+                    id: shapeMenu
+                    objectName: "shapeMenu"
+                    x: parent ? (parent.width - width) / 2 : 0
+                    y: -height - 14
+                    padding: 8
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    background: Rectangle {
+                        color: win.panel
+                        border.color: theme.colors.selection
+                        radius: theme.radius
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        // A popup is not an Item and doesn't inherit the
+                        // window's mirroring, so its content opts in.
+                        LayoutMirroring.enabled: win.rightToLeft
+                        LayoutMirroring.childrenInherit: true
+
+                        Repeater {
+                            model: win.shapes
+                            delegate: Rectangle {
+                                id: shapeRow
+                                required property var modelData
+                                readonly property bool current: view.tool === modelData.tool
+                                objectName: "shape-" + modelData.tool
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: shapeLine.implicitWidth + 20
+                                Layout.preferredHeight: 32
+                                radius: Math.min(4, theme.radius)
+                                color: current || shapeRowHover.hovered ? theme.colors.selection : "transparent"
+
+                                RowLayout {
+                                    id: shapeLine
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 10
+
+                                    Shape {
+                                        Layout.preferredWidth: 20
+                                        Layout.preferredHeight: 20
+                                        preferredRendererType: Shape.CurveRenderer
+                                        ShapePath {
+                                            strokeColor: theme.foreground
+                                            strokeWidth: 1.5
+                                            fillColor: "transparent"
+                                            capStyle: ShapePath.RoundCap
+                                            joinStyle: ShapePath.RoundJoin
+                                            PathSvg { path: shapeRow.modelData.icon }
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: shapeRow.modelData.label
+                                    }
+                                    Label {
+                                        Layout.leftMargin: 14
+                                        text: shapeRow.modelData.key
+                                        opacity: 0.6
+                                    }
+                                }
+                                HoverHandler { id: shapeRowHover }
+                                TapHandler {
+                                    onTapped: {
+                                        view.tool = shapeRow.modelData.tool
+                                        shapeMenu.close()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: 1
+                    Layout.preferredHeight: 26
+                    Layout.leftMargin: 6
+                    Layout.rightMargin: 6
+                    color: theme.colors.selection
+                }
+
+                // Every color behind one button; the number keys still pick them.
+                Rectangle {
+                    id: colorButton
+                    objectName: "colorButton"
+                    Layout.preferredWidth: 42
+                    Layout.preferredHeight: 42
+                    radius: Math.min(4, theme.radius)
+                    color: colorMenu.visible || colorHover.hovered ? theme.colors.selection : "transparent"
+
+                    // A true circle, whatever the theme's corners.
+                    Rectangle {
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -4
+                        width: 20
+                        height: 20
+                        radius: 10
+                        color: board.color ? theme.colors[board.color] : "transparent"
+                        border.color: board.color ? "transparent" : theme.foreground
+                        border.width: 2
+                    }
+                    Shape {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.rightMargin: 4
+                        width: 8
+                        height: 6
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: theme.foreground
+                            strokeWidth: 1.4
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
+                            PathSvg { path: "M1 4.5 L4 1.5 L7 4.5" }
+                        }
+                    }
+                    HoverHandler { id: colorHover }
+                    TapHandler { onTapped: colorMenu.visible ? colorMenu.close() : colorMenu.open() }
+                    ToolTip.visible: colorHover.hovered && !colorMenu.visible
+                    ToolTip.delay: 500
+                    ToolTip.text: qsTr("Color")
+
+                    Popup {
+                        id: colorMenu
+                        objectName: "colorMenu"
+                        x: (parent.width - width) / 2
+                        y: -height - 14
+                        padding: 8
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        background: Rectangle {
+                            color: win.panel
+                            border.color: theme.colors.selection
+                            radius: theme.radius
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            // A popup is not an Item and doesn't inherit the
+                            // window's mirroring, so its content opts in.
+                            LayoutMirroring.enabled: win.rightToLeft
+                            LayoutMirroring.childrenInherit: true
+
+                            Repeater {
+                                model: win.swatches
+                                delegate: Rectangle {
+                                    id: swatch
+                                    required property string modelData
+                                    required property int index
+                                    readonly property bool current: board.color === modelData
+                                    objectName: "color-" + (modelData || "none")
+                                    Layout.preferredWidth: 76
+                                    Layout.preferredHeight: 32
+                                    radius: Math.min(4, theme.radius)
+                                    color: current || swatchHover.hovered ? theme.colors.selection : "transparent"
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.leftMargin: 10
+                                        width: 18
+                                        height: 18
+                                        radius: 9
+                                        color: swatch.modelData ? theme.colors[swatch.modelData] : "transparent"
+                                        border.color: swatch.modelData ? "transparent" : theme.foreground
+                                        border.width: 2
+                                    }
+                                    Label {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.rightMargin: 12
+                                        text: swatch.index + 1
+                                        opacity: 0.7
+                                    }
+                                    HoverHandler { id: swatchHover }
+                                    TapHandler {
+                                        onTapped: {
+                                            win.paint(swatch.index)
+                                            colorMenu.close()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Lining shapes up, and which of them is in front.
+                Rectangle {
+                    id: arrangeButton
+                    objectName: "arrangeButton"
+                    Layout.preferredWidth: 42
+                    Layout.preferredHeight: 42
+                    radius: Math.min(4, theme.radius)
+                    color: arrangeMenu.visible || arrangeHover.hovered ? theme.colors.selection : "transparent"
+
+                    Shape {
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -4
+                        width: 20
+                        height: 20
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: theme.foreground
+                            strokeWidth: 1.6
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
+                            PathSvg { path: "M3 3 V17 M6 5.5 H16 V9 H6 Z M6 11 H11.5 V14.5 H6 Z" }
+                        }
+                    }
+                    Shape {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.rightMargin: 4
+                        width: 8
+                        height: 6
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: theme.foreground
+                            strokeWidth: 1.4
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
+                            PathSvg { path: "M1 4.5 L4 1.5 L7 4.5" }
+                        }
+                    }
+                    HoverHandler { id: arrangeHover }
+                    TapHandler { onTapped: arrangeMenu.visible ? arrangeMenu.close() : arrangeMenu.open() }
+                    ToolTip.visible: arrangeHover.hovered && !arrangeMenu.visible
+                    ToolTip.delay: 500
+                    ToolTip.text: qsTr("Arrange")
+
+                    Popup {
+                        id: arrangeMenu
+                        objectName: "arrangeMenu"
+                        x: (parent.width - width) / 2
+                        y: -height - 14
+                        padding: 8
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        background: Rectangle {
+                            color: win.panel
+                            border.color: theme.colors.selection
+                            radius: theme.radius
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            // A popup is not an Item and doesn't inherit the
+                            // window's mirroring, so its content opts in.
+                            LayoutMirroring.enabled: win.rightToLeft
+                            LayoutMirroring.childrenInherit: true
+
+                            Repeater {
+                                // Aligning needs two things to line up; the
+                                // order needs one to move.
+                                model: [
+                                    { name: "left", label: qsTr("Align left"), key: "Alt+←", needs: 2,
+                                      icon: "M3 3 V17 M6 5.5 H16 V9 H6 Z M6 11 H11.5 V14.5 H6 Z" },
+                                    { name: "center", label: qsTr("Center horizontally"), key: "Alt+H", needs: 2,
+                                      icon: "M10 3 V17 M4.5 5.5 H15.5 V9 H4.5 Z M7 11 H13 V14.5 H7 Z" },
+                                    { name: "right", label: qsTr("Align right"), key: "Alt+→", needs: 2,
+                                      icon: "M17 3 V17 M4 5.5 H14 V9 H4 Z M8.5 11 H14 V14.5 H8.5 Z" },
+                                    { name: "top", label: qsTr("Align top"), key: "Alt+↑", needs: 2,
+                                      icon: "M3 3 H17 M5.5 6 V16 H9 V6 Z M11 6 V11.5 H14.5 V6 Z" },
+                                    { name: "middle", label: qsTr("Center vertically"), key: "Alt+V", needs: 2,
+                                      icon: "M3 10 H17 M5.5 4.5 V15.5 H9 V4.5 Z M11 7 V13 H14.5 V7 Z" },
+                                    { name: "bottom", label: qsTr("Align bottom"), key: "Alt+↓", needs: 2,
+                                      icon: "M3 17 H17 M5.5 4 V14 H9 V4 Z M11 8.5 V14 H14.5 V8.5 Z" },
+                                    { name: "front", label: qsTr("Bring to front"), key: "]", needs: 1,
+                                      icon: "M8 8 H17 V17 H8 Z M3 12 V3 H12" },
+                                    { name: "back", label: qsTr("Send to back"), key: "[", needs: 1,
+                                      icon: "M3 3 H12 V12 H3 Z M17 8 V17 H8" }
+                                ]
+                                delegate: Rectangle {
+                                    id: arrangeRow
+                                    required property var modelData
+                                    readonly property bool usable: board.selectionCount >= modelData.needs
+                                    objectName: "arrange-" + modelData.name
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: arrangeLine.implicitWidth + 20
+                                    Layout.preferredHeight: 32
+                                    radius: Math.min(4, theme.radius)
+                                    color: usable && arrangeRowHover.hovered ? theme.colors.selection : "transparent"
+                                    opacity: usable ? 1 : 0.4
+
+                                    RowLayout {
+                                        id: arrangeLine
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 10
+                                        spacing: 10
+
+                                        Shape {
+                                            Layout.preferredWidth: 20
+                                            Layout.preferredHeight: 20
+                                            preferredRendererType: Shape.CurveRenderer
+                                            ShapePath {
+                                                strokeColor: theme.foreground
+                                                strokeWidth: 1.5
+                                                fillColor: "transparent"
+                                                capStyle: ShapePath.RoundCap
+                                                joinStyle: ShapePath.RoundJoin
+                                                PathSvg { path: arrangeRow.modelData.icon }
+                                            }
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: arrangeRow.modelData.label
+                                        }
+                                        Label {
+                                            Layout.leftMargin: 14
+                                            text: arrangeRow.modelData.key
+                                            opacity: 0.6
+                                        }
+                                    }
+                                    HoverHandler { id: arrangeRowHover }
+                                    TapHandler {
+                                        enabled: arrangeRow.usable
+                                        onTapped: {
+                                            const name = arrangeRow.modelData.name
+                                            if (name === "front")
+                                                board.bringToFront()
+                                            else if (name === "back")
+                                                board.sendToBack()
+                                            else
+                                                board.alignSelection(name)
+                                            arrangeMenu.close()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // How far in the canvas is.
+        Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 20
+            width: status.implicitWidth + 24
+            height: 34
+            radius: theme.radius
+            color: win.panel
+            border.color: theme.colors.selection
+            Label {
+                id: status
+                objectName: "status"
+                anchors.centerIn: parent
+                // Reads the language, so the number is written anew on a switch.
+                text: translator.language, qsTr("%1%").arg(Math.round(view.zoom * 100).toLocaleString(Qt.locale(), 'f', 0))
+            }
+        }
+
+        // Which board this is, and the way to the others.
+        Rectangle {
+            id: boardButton
+            objectName: "boardButton"
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.margins: 20
+            width: Math.min(boardName.implicitWidth, 260) + 46
+            height: 34
+            radius: theme.radius
+            color: boardMenu.visible || boardHover.hovered
+                   ? Qt.tint(win.panel, Qt.alpha(theme.foreground, 0.06)) : win.panel
+            border.color: theme.colors.selection
+
+            Label {
+                id: boardName
+                objectName: "boardName"
+                anchors.left: parent.left
+                anchors.right: boardChevron.left
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: 12
+                anchors.rightMargin: 8
+                elide: Text.ElideRight
+                text: backend.currentName
+            }
+            Shape {
+                id: boardChevron
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                anchors.rightMargin: 12
+                width: 8
+                height: 6
+                preferredRendererType: Shape.CurveRenderer
+                ShapePath {
+                    strokeColor: theme.foreground
+                    strokeWidth: 1.4
+                    fillColor: "transparent"
+                    capStyle: ShapePath.RoundCap
+                    joinStyle: ShapePath.RoundJoin
+                    PathSvg { path: "M1 1.5 L4 4.5 L7 1.5" }
+                }
+            }
+            HoverHandler { id: boardHover }
+            TapHandler { onTapped: boardMenu.visible ? boardMenu.close() : boardMenu.open() }
+
+            Popup {
+                id: boardMenu
+                objectName: "boardMenu"
+                x: win.rightToLeft ? parent.width - width : 0
+                y: parent.height + 6
+                width: 260
+                padding: 8
+                focus: true
+                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                // The question about deleting a board waits until this menu
+                // is gone, or the keyboard stays with the menu as it closes
+                // and Escape never reaches the question.
+                property var pendingDelete: null
+                onClosed: {
+                    win.renamingId = ""
+                    const doomed = pendingDelete
+                    pendingDelete = null
+                    if (doomed)
+                        win.askToDelete(doomed.id, doomed.name)
+                }
+                background: Rectangle {
+                    color: win.panel
+                    border.color: theme.colors.selection
+                    radius: theme.radius
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 2
+                    // An open popup keeps the keys to itself, so the key that
+                    // opened it closes it from in here.
+                    focus: true
+                    Keys.onPressed: (event) => {
+                        if (event.key === Qt.Key_B && !win.typing) {
+                            boardMenu.close()
+                            event.accepted = true
+                        }
+                    }
+                    // A popup is not an Item and doesn't inherit the window's
+                    // mirroring, so its content opts in.
+                    LayoutMirroring.enabled: win.rightToLeft
+                    LayoutMirroring.childrenInherit: true
+
+                    ListView {
+                        id: boardList
+                        objectName: "boardList"
+                        Layout.fillWidth: true
+                        // As tall as its boards, until the window runs out.
+                        Layout.preferredHeight: Math.min(contentHeight, win.height - 200)
+                        clip: true
+                        spacing: 2
+                        boundsBehavior: Flickable.StopAtBounds
+                        model: backend.boards
+                        delegate: Rectangle {
+                            id: row
+                            required property var modelData
+                            required property int index
+                            readonly property bool current: modelData.id === backend.currentId
+                            readonly property bool renaming: win.renamingId === modelData.id
+                            objectName: "board-" + index
+                            width: boardList.width
+                            height: 34
+                            radius: Math.min(4, theme.radius)
+                            color: current ? theme.colors.selection
+                                 : rowHover.hovered ? Qt.alpha(theme.foreground, 0.06) : "transparent"
+
+                            HoverHandler { id: rowHover }
+                            TapHandler {
+                                enabled: !row.renaming
+                                // A tap on the pencil or the cross is theirs
+                                // alone; anywhere else on the row opens the board.
+                                onTapped: (point) => {
+                                    // Judged by where the tap was, not by whether
+                                    // they still show: the pencil's own tap has
+                                    // already hidden them by the time this runs.
+                                    if (rowActions.contains(rowActions.mapFromItem(row, point.position)))
+                                        return
+                                    backend.open(row.modelData.id)
+                                    boardMenu.close()
+                                }
+                            }
+
+                            Label {
+                                visible: !row.renaming
+                                anchors.left: parent.left
+                                anchors.right: rowActions.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 10
+                                elide: Text.ElideRight
+                                text: row.modelData.name
+                            }
+                            TextInput {
+                                id: nameField
+                                visible: row.renaming
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                clip: true
+                                color: theme.foreground
+                                font: status.font
+                                selectionColor: theme.accent
+                                selectedTextColor: theme.accentForeground
+                                function begin() {
+                                    text = row.modelData.name
+                                    forceActiveFocus()
+                                    selectAll()
+                                }
+                                onVisibleChanged: if (visible) begin()
+                                Component.onCompleted: if (visible) begin()
+                                // Leaving the field keeps the name as it was.
+                                function finish(keep) {
+                                    const id = row.modelData.id, name = text
+                                    win.renamingId = ""
+                                    if (keep)
+                                        backend.rename(id, name)
+                                }
+                                onAccepted: finish(true)
+                                Keys.onEscapePressed: finish(false)
+                                onActiveFocusChanged: if (!activeFocus && row.renaming) win.renamingId = ""
+                            }
+                            Row {
+                                id: rowActions
+                                visible: rowHover.hovered && !row.renaming
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.rightMargin: 4
+
+                                Item {
+                                    objectName: "rename-" + row.index
+                                    width: 26
+                                    height: 26
+                                    Shape {
+                                        anchors.centerIn: parent
+                                        width: 14
+                                        height: 14
+                                        preferredRendererType: Shape.CurveRenderer
+                                        ShapePath {
+                                            strokeColor: renameHover.hovered ? theme.foreground : theme.colors.muted
+                                            strokeWidth: 1.3
+                                            fillColor: "transparent"
+                                            capStyle: ShapePath.RoundCap
+                                            joinStyle: ShapePath.RoundJoin
+                                            PathSvg { path: "M2 12 L2.6 9.2 L9.8 2 L12 4.2 L4.8 11.4 Z M8.4 3.4 L10.6 5.6" }
+                                        }
+                                    }
+                                    HoverHandler { id: renameHover }
+                                    TapHandler { onTapped: win.renamingId = row.modelData.id }
+                                    ToolTip.visible: renameHover.hovered
+                                    ToolTip.delay: 500
+                                    ToolTip.text: qsTr("Rename this board")
+                                }
+                                Label {
+                                    objectName: "delete-" + row.index
+                                    width: 26
+                                    height: 26
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    text: "×"
+                                    font.pixelSize: 18
+                                    color: removeHover.hovered ? theme.colors.red : theme.colors.muted
+                                    HoverHandler { id: removeHover }
+                                    TapHandler {
+                                        onTapped: {
+                                            boardMenu.pendingDelete = { id: row.modelData.id, name: row.modelData.name }
+                                            boardMenu.close()
+                                        }
+                                    }
+                                    ToolTip.visible: removeHover.hovered
+                                    ToolTip.delay: 500
+                                    ToolTip.text: qsTr("Delete this board")
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        Layout.topMargin: 4
+                        Layout.bottomMargin: 4
+                        color: theme.colors.selection
+                    }
+
+                    Rectangle {
+                        id: newRow
+                        objectName: "newBoard"
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 34
+                        radius: Math.min(4, theme.radius)
+                        color: newHover.hovered ? Qt.alpha(theme.foreground, 0.06) : "transparent"
+
+                        Label {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 10
+                            text: qsTr("New board")
+                            color: theme.accent
+                        }
+                        Label {
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.rightMargin: 10
+                            text: "Ctrl+N"
+                            opacity: 0.6
+                        }
+                        HoverHandler { id: newHover }
+                        TapHandler {
+                            onTapped: {
+                                backend.newBoard()
+                                boardMenu.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // The board as a file, in Downloads.
+        Row {
+            id: exports
+            anchors.left: boardButton.right
+            anchors.top: boardButton.top
+            anchors.leftMargin: 8
+            spacing: 8
+
+            Repeater {
+                model: ["PDF", "SVG"]
+                delegate: Rectangle {
+                    id: exportButton
+                    required property string modelData
+                    readonly property bool usable: board.count > 0
+                    objectName: "export-" + modelData.toLowerCase()
+                    width: exportLabel.implicitWidth + 24
+                    height: 34
+                    radius: theme.radius
+                    color: usable && exportHover.hovered
+                           ? Qt.tint(win.panel, Qt.alpha(theme.foreground, 0.06)) : win.panel
+                    border.color: theme.colors.selection
+
+                    Label {
+                        id: exportLabel
+                        anchors.centerIn: parent
+                        text: exportButton.modelData
+                        opacity: exportButton.usable ? 1 : 0.4
+                    }
+                    HoverHandler { id: exportHover }
+                    TapHandler {
+                        enabled: exportButton.usable
+                        onTapped: win.download(exportButton.modelData.toLowerCase())
+                    }
+                    ToolTip.visible: exportHover.hovered
+                    ToolTip.delay: 500
+                    ToolTip.text: qsTr("Save this board to Downloads as %1").arg(modelData)
+                }
+            }
+        }
+
+        // Where the file went, or that it couldn't be written.
+        Rectangle {
+            objectName: "notice"
+            visible: win.notice !== ""
+            anchors.left: boardButton.left
+            anchors.top: boardButton.bottom
+            anchors.topMargin: 8
+            width: noticeLabel.width + 24
+            height: noticeLabel.implicitHeight + 16
+            radius: theme.radius
+            color: win.noticeFailed ? theme.colors.red : win.panel
+            border.color: win.noticeFailed ? theme.colors.red : theme.accent
+            Label {
+                id: noticeLabel
+                objectName: "noticeLabel"
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, win.width - 64)
+                wrapMode: Text.WrapAnywhere
+                color: win.noticeFailed ? "black" : theme.foreground
+                text: win.noticeFailed ? qsTr("Could not save to %1").arg(win.notice)
+                                       : qsTr("Saved to %1").arg(win.notice)
+            }
+        }
+    }
+
+    Popup {
+        id: help
+        objectName: "help"
+        Overlay.modal: Rectangle { color: Qt.alpha("black", 0.45) }
+        readonly property var entries: [
+            { keys: "R  O  T  L", action: qsTr("Draw a rectangle, circle, triangle or line") },
+            { keys: "P", action: qsTr("Stick a post-it") },
+            { keys: "X · T T", action: qsTr("Write text") },
+            { keys: "C", action: qsTr("Connect two shapes") },
+            { keys: "V · Esc", action: qsTr("Select and move") },
+            { keys: "Enter", action: qsTr("Write on the selected shape") },
+            { keys: "1 – 8", action: qsTr("Color the selection") },
+            { keys: "Alt", action: qsTr("Hold and drag a handle to rotate the shape") },
+            { keys: ",  .", action: qsTr("Rotate the selection") },
+            { keys: "Delete", action: qsTr("Delete the selection") },
+            { keys: "Ctrl+C · Ctrl+V", action: qsTr("Copy and paste") },
+            { keys: "Ctrl+D", action: qsTr("Duplicate") },
+            { keys: "Ctrl+A", action: qsTr("Select everything") },
+            { keys: "Ctrl+Z · Ctrl+Shift+Z", action: qsTr("Undo and redo") },
+            { keys: "← ↑ ↓ →", action: qsTr("Nudge the selection") },
+            { keys: "Alt+← ↑ ↓ →", action: qsTr("Align the selected shapes on that side") },
+            { keys: "Alt+H · Alt+V", action: qsTr("Center the selected shapes on each other, across or up and down") },
+            { keys: "]  [", action: qsTr("Bring to the front or send to the back") },
+            { keys: "+  −  0", action: qsTr("Zoom in, out, and back to 100%") },
+            { keys: "F", action: qsTr("Fit everything in the window") },
+            { keys: "Space", action: qsTr("Hold and drag to pan") },
+            { keys: "B", action: qsTr("Show or hide the boards") },
+            { keys: "Ctrl+N", action: qsTr("New board") },
+            { keys: "Ctrl+Tab", action: qsTr("Next board") },
+            { keys: "F2", action: qsTr("Rename this board") },
+            { keys: "?", action: qsTr("Show or hide the shortcuts") },
+            { keys: "Q", action: qsTr("Quit") }
+        ]
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        focus: true
+        padding: 24
+        height: Math.min(implicitHeight, win.height - 48)
+        background: Rectangle {
+            color: theme.background
+            border.color: theme.colors.selection
+            radius: theme.radius
+        }
+
+        contentItem: Flickable {
+            implicitWidth: shortcuts.implicitWidth
+            implicitHeight: shortcuts.implicitHeight
+            contentHeight: shortcuts.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            // A popup is not an Item and doesn't inherit the window's
+            // mirroring, so its content opts in.
+            GridLayout {
+                id: shortcuts
+                columns: 2
+                columnSpacing: 24
+                rowSpacing: 6
+                LayoutMirroring.enabled: win.rightToLeft
+                LayoutMirroring.childrenInherit: true
+
+                Repeater {
+                    model: help.entries
+                    delegate: Label {
+                        required property var modelData
+                        required property int index
+                        Layout.row: index
+                        Layout.column: 0
+                        text: modelData.keys
+                        color: theme.accent
+                        font.bold: true
+                    }
+                }
+                Repeater {
+                    model: help.entries
+                    delegate: Label {
+                        required property var modelData
+                        required property int index
+                        Layout.row: index
+                        Layout.column: 1
+                        text: modelData.action
+                    }
+                }
+            }
+        }
+    }
+
+    Popup {
+        id: confirm
+        objectName: "confirm"
+        Overlay.modal: Rectangle { color: Qt.alpha("black", 0.45) }
+        property string boardId: ""
+        property string boardName: ""
+        anchors.centerIn: Overlay.overlay
+        modal: true
+        focus: true
+        padding: 24
+        background: Rectangle {
+            color: theme.background
+            border.color: theme.colors.selection
+            radius: theme.radius
+        }
+
+        ColumnLayout {
+            spacing: 20
+            LayoutMirroring.enabled: win.rightToLeft
+            LayoutMirroring.childrenInherit: true
+
+            Label {
+                Layout.maximumWidth: 380
+                wrapMode: Text.Wrap
+                text: qsTr("Delete the board “%1”? It can't be brought back.").arg(confirm.boardName)
+            }
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                // Escape and Enter both land here: the answer that loses nothing.
+                Button {
+                    objectName: "keepBoard"
+                    text: qsTr("Keep it")
+                    flat: true
+                    focus: true
+                    Material.roundedScale: theme.radius
+                    onClicked: confirm.close()
+                }
+                Button {
+                    id: deleteButton
+                    objectName: "deleteBoard"
+                    text: qsTr("Delete")
+                    highlighted: true
+                    Material.roundedScale: theme.radius
+                    onClicked: {
+                        confirm.close()
+                        backend.remove(confirm.boardId)
+                    }
+                    // A highlighted button colors its caption by Material's own
+                    // rule, not Material.foreground, so it can't read on every accent.
+                    contentItem: Label {
+                        text: deleteButton.text
+                        font: deleteButton.font
+                        color: theme.accentForeground
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+    }
+}

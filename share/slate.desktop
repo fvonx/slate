@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Slate
+Comment=Sketch shapes and connections on an infinite canvas
+Comment[da]=Tegn former og forbindelser på et uendeligt lærred
+Comment[de]=Formen und Verbindungen auf einer unendlichen Leinwand skizzieren
+Exec=slate
+Icon=slate
+Terminal=false
+Categories=Graphics;
+Keywords=canvas;whiteboard;diagram;draw;shapes;
+StartupWMClass=slate
