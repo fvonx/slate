@@ -33,6 +33,16 @@ ApplicationWindow {
         { tool: "triangle", key: "T", label: qsTr("Triangle"), icon: "M10 3 L17.5 16.5 H2.5 Z" },
         { tool: "line", key: "L", label: qsTr("Line"), icon: "M3 17 L17 3" }
     ]
+    // What each icon is called, for the menu's tooltips.
+    readonly property var iconLabels: ({
+        star: qsTr("Star"), heart: qsTr("Heart"), check: qsTr("Check"), cross: qsTr("Cross"),
+        warning: qsTr("Warning"), info: qsTr("Information"), question: qsTr("Question"), idea: qsTr("Idea"),
+        flag: qsTr("Flag"), person: qsTr("Person"), clock: qsTr("Clock"), calendar: qsTr("Calendar"),
+        lock: qsTr("Lock"), bolt: qsTr("Lightning"), target: qsTr("Target"), home: qsTr("Home"),
+        mail: qsTr("Mail"), chat: qsTr("Chat"), search: qsTr("Search"), location: qsTr("Location"),
+        arrow: qsTr("Arrow")
+    })
+
     property string lastShape: "rect"
     readonly property var shownShape: shapes.find(shape => shape.tool === lastShape)
     readonly property bool drawingShape: shapes.some(shape => shape.tool === view.tool)
@@ -89,12 +99,13 @@ ApplicationWindow {
     Shortcut { sequence: "X"; enabled: win.keys; onActivated: view.tool = "text" }
     Shortcut { sequence: "L"; enabled: win.keys; onActivated: view.tool = "line" }
     Shortcut { sequence: "P"; enabled: win.keys; onActivated: view.tool = "postit" }
+    Shortcut { sequence: "I"; enabled: win.keys; onActivated: iconMenu.visible ? iconMenu.close() : iconMenu.open() }
     Shortcut { sequence: ","; enabled: win.keys; onActivated: board.rotateSelection(-15) }
     Shortcut { sequence: "."; enabled: win.keys; onActivated: board.rotateSelection(15) }
     Shortcut { sequence: "C"; enabled: win.keys; onActivated: view.tool = "connect" }
     Shortcut {
         sequence: "Escape"
-        enabled: win.keys && !colorMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible
+        enabled: win.keys && !colorMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible && !iconMenu.visible
         onActivated: {
             if (view.tool !== "select")
                 view.tool = "select"
@@ -244,7 +255,8 @@ ApplicationWindow {
                     model: [
                         { tool: "select", key: "V", tip: qsTr("Select and move"),
                           icon: "M4 2 L4 16 L8 12.5 L10.5 18 L12.5 17 L10 11.5 L15 11.5 Z" },
-                        { tool: "shapes", shapes: true, tip: qsTr("Shapes") },
+                        { tool: "shapes", menu: "shapes", tip: qsTr("Shapes") },
+                        { tool: "icons", menu: "icons", tip: qsTr("Icons") },
                         { tool: "postit", key: "P", tip: qsTr("Post-it"),
                           icon: "M3 3 H17 V12 L12 17 H3 Z M17 12 H12 V17" },
                         { tool: "text", key: "X", tip: qsTr("Text"),
@@ -255,20 +267,28 @@ ApplicationWindow {
                     delegate: Rectangle {
                         id: toolButton
                         required property var modelData
-                        // One entry stands for all the shapes, and opens their menu.
-                        readonly property bool menu: modelData.shapes === true
-                        readonly property bool active: menu ? win.drawingShape : view.tool === modelData.tool
-                        readonly property string icon: menu ? win.shownShape.icon : modelData.icon
+                        // One entry stands for all the shapes, and one for all the
+                        // icons; each opens its menu and shows the one last used.
+                        readonly property string menu: modelData.menu || ""
+                        readonly property Popup popup: menu === "shapes" ? shapeMenu : menu === "icons" ? iconMenu : null
+                        readonly property bool active: menu === "shapes" ? win.drawingShape
+                                                     : menu === "icons" ? view.tool === "icon"
+                                                     : view.tool === modelData.tool
+                        readonly property string icon: menu === "shapes" ? win.shownShape.icon
+                                                     : menu === "icons" ? board.iconPath(view.iconName)
+                                                     : modelData.icon
+                        // Icons are drawn on a 24 square, the toolbar's own on 20.
+                        readonly property real iconBox: menu === "icons" ? 24 : 20
                         objectName: "tool-" + modelData.tool
-                        Component.onCompleted: if (menu) shapeMenu.parent = toolButton
+                        Component.onCompleted: if (popup) popup.parent = toolButton
                         Layout.preferredWidth: 42
                         Layout.preferredHeight: 42
                         radius: Math.min(4, theme.radius)
                         color: active ? theme.accent
-                             : toolHover.hovered || (menu && shapeMenu.visible) ? theme.colors.selection : "transparent"
+                             : toolHover.hovered || (popup && popup.visible) ? theme.colors.selection : "transparent"
 
                         Shape {
-                            visible: toolButton.menu
+                            visible: toolButton.popup !== null
                             anchors.right: parent.right
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.rightMargin: 4
@@ -286,13 +306,14 @@ ApplicationWindow {
                         }
                         Shape {
                             anchors.centerIn: parent
-                            anchors.horizontalCenterOffset: toolButton.menu ? -4 : 0
-                            width: 20
-                            height: 20
+                            anchors.horizontalCenterOffset: toolButton.popup ? -4 : 0
+                            width: toolButton.iconBox
+                            height: toolButton.iconBox
+                            scale: 20 / toolButton.iconBox
                             preferredRendererType: Shape.CurveRenderer
                             ShapePath {
                                 strokeColor: toolButton.active ? theme.accentForeground : theme.foreground
-                                strokeWidth: 1.6
+                                strokeWidth: 1.6 * toolButton.iconBox / 20
                                 fillColor: "transparent"
                                 capStyle: ShapePath.RoundCap
                                 joinStyle: ShapePath.RoundJoin
@@ -304,7 +325,8 @@ ApplicationWindow {
                             anchors.bottom: parent.bottom
                             anchors.rightMargin: 4
                             anchors.bottomMargin: 1
-                            text: toolButton.menu ? win.shownShape.key : toolButton.modelData.key
+                            text: toolButton.menu === "shapes" ? win.shownShape.key
+                                : toolButton.menu === "icons" ? "I" : toolButton.modelData.key
                             font.pixelSize: 9
                             opacity: 0.6
                             color: toolButton.active ? theme.accentForeground : theme.foreground
@@ -312,15 +334,15 @@ ApplicationWindow {
                         HoverHandler { id: toolHover }
                         TapHandler {
                             onTapped: {
-                                if (!toolButton.menu)
+                                if (!toolButton.popup)
                                     view.tool = toolButton.modelData.tool
-                                else if (shapeMenu.visible)
-                                    shapeMenu.close()
+                                else if (toolButton.popup.visible)
+                                    toolButton.popup.close()
                                 else
-                                    shapeMenu.open()
+                                    toolButton.popup.open()
                             }
                         }
-                        ToolTip.visible: toolHover.hovered && !(menu && shapeMenu.visible)
+                        ToolTip.visible: toolHover.hovered && !(popup && popup.visible)
                         ToolTip.delay: 500
                         ToolTip.text: modelData.tip
                     }
@@ -398,6 +420,72 @@ ApplicationWindow {
                                         shapeMenu.close()
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // The icons' menu; like the shapes', its button takes it.
+                Popup {
+                    id: iconMenu
+                    objectName: "iconMenu"
+                    x: parent ? (parent.width - width) / 2 : 0
+                    y: -height - 14
+                    padding: 8
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    background: Rectangle {
+                        color: win.panel
+                        border.color: theme.colors.selection
+                        radius: theme.radius
+                    }
+
+                    GridLayout {
+                        columns: 7
+                        rowSpacing: 2
+                        columnSpacing: 2
+                        // A popup is not an Item and doesn't inherit the
+                        // window's mirroring, so its content opts in.
+                        LayoutMirroring.enabled: win.rightToLeft
+                        LayoutMirroring.childrenInherit: true
+
+                        Repeater {
+                            model: board.iconNames
+                            delegate: Rectangle {
+                                id: iconCell
+                                required property string modelData
+                                readonly property bool current: view.tool === "icon" && view.iconName === modelData
+                                objectName: "icon-" + modelData
+                                Layout.preferredWidth: 38
+                                Layout.preferredHeight: 38
+                                radius: Math.min(4, theme.radius)
+                                color: current || cellHover.hovered ? theme.colors.selection : "transparent"
+
+                                Shape {
+                                    anchors.centerIn: parent
+                                    width: 24
+                                    height: 24
+                                    preferredRendererType: Shape.CurveRenderer
+                                    ShapePath {
+                                        strokeColor: theme.foreground
+                                        strokeWidth: 1.6
+                                        fillColor: "transparent"
+                                        capStyle: ShapePath.RoundCap
+                                        joinStyle: ShapePath.RoundJoin
+                                        PathSvg { path: board.iconPath(iconCell.modelData) }
+                                    }
+                                }
+                                HoverHandler { id: cellHover }
+                                TapHandler {
+                                    onTapped: {
+                                        view.iconName = iconCell.modelData
+                                        view.tool = "icon"
+                                        iconMenu.close()
+                                    }
+                                }
+                                ToolTip.visible: cellHover.hovered
+                                ToolTip.delay: 400
+                                ToolTip.text: win.iconLabels[modelData] || modelData
                             }
                         }
                     }
@@ -1036,6 +1124,7 @@ ApplicationWindow {
         readonly property var entries: [
             { keys: "R  O  T  L", action: qsTr("Draw a rectangle, circle, triangle or line") },
             { keys: "P", action: qsTr("Stick a post-it") },
+            { keys: "I", action: qsTr("Place an icon") },
             { keys: "X · T T", action: qsTr("Write text") },
             { keys: "C", action: qsTr("Connect two shapes") },
             { keys: "V · Esc", action: qsTr("Select and move") },

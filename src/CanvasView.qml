@@ -13,6 +13,8 @@ Item {
     focus: true
 
     property string tool: "select"
+    // The icon the icon tool places.
+    property string iconName: "star"
     property real camX: 0
     property real camY: 0
     property real zoom: 1
@@ -197,7 +199,7 @@ Item {
         if (editing)
             commitEdit()
         const it = board.item(id)
-        if (!it.kind || it.kind === "line" || it.kind === "connector")
+        if (!it.kind || it.kind === "line" || it.kind === "connector" || it.kind === "icon")
             return
         board.checkpoint()
         board.selectOnly(id)
@@ -573,7 +575,8 @@ Item {
             board.selectInRect(pressWorld.x, pressWorld.y, p.x - pressWorld.x, p.y - pressWorld.y, bandAdd)
         } else if (mode === "draw") {
             if (!drawId)
-                drawId = board.add(tool, pressWorld.x, pressWorld.y, 0, 0)
+                drawId = tool === "icon" ? board.addIcon(iconName, pressWorld.x, pressWorld.y, 0, 0)
+                                         : board.add(tool, pressWorld.x, pressWorld.y, 0, 0)
             let w = p.x - pressWorld.x, h = p.y - pressWorld.y
             if (tool === "line") {
                 const end = lineEnd(pressWorld, p, shift)
@@ -742,9 +745,11 @@ Item {
         if (was === "draw") {
             // A click drops the shape at a comfortable size around the pointer.
             if (!drawId && tool !== "line") {
-                const w = tool === "rect" ? 160 : tool === "postit" ? 150 : 120
-                const h = tool === "rect" ? 100 : tool === "triangle" ? 110 : tool === "postit" ? 150 : 120
-                drawId = board.add(tool, p.x - w / 2, p.y - h / 2, w, h)
+                const w = tool === "rect" ? 160 : tool === "postit" ? 150 : tool === "icon" ? 64 : 120
+                const h = tool === "rect" ? 100 : tool === "triangle" ? 110 : tool === "postit" ? 150
+                        : tool === "icon" ? 64 : 120
+                drawId = tool === "icon" ? board.addIcon(iconName, p.x - w / 2, p.y - h / 2, w, h)
+                                         : board.add(tool, p.x - w / 2, p.y - h / 2, w, h)
             }
             // A post-it is for writing on, so it is ready to be typed into.
             const stuck = tool === "postit" ? drawId : 0
@@ -905,6 +910,34 @@ Item {
                                 PathLine { x: triangleBody.width - 1; y: triangleBody.height - 1 }
                                 PathLine { x: 1; y: triangleBody.height - 1 }
                                 PathLine { x: triangleBody.width / 2; y: 1 }
+                            }
+                        }
+                    }
+                }
+
+                DelegateChoice {
+                    roleValue: "icon"
+                    Body {
+                        id: iconBody
+                        required property string iconName
+                        zoom: view.zoom
+                        editingId: view.editingId
+                        // Drawn square in the middle of its box, from the
+                        // same 24 by 24 outline the menu and the files use.
+                        Shape {
+                            anchors.centerIn: parent
+                            width: 24
+                            height: 24
+                            scale: Math.min(iconBody.width, iconBody.height) / 24
+                            z: -1
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: iconBody.ink
+                                strokeWidth: 1.8
+                                fillColor: "transparent"
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+                                PathSvg { path: board.iconPath(iconBody.iconName) }
                             }
                         }
                     }

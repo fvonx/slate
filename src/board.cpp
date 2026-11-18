@@ -1,5 +1,7 @@
 #include "board.h"
 
+#include "icons.h"
+
 #include <QClipboard>
 #include <QGuiApplication>
 #include <QJsonDocument>
@@ -16,7 +18,7 @@ const double edgeGap = 5;
 const int undoLimit = 200;
 
 const QStringList &kinds() {
-    static const QStringList kinds{"rect", "ellipse", "triangle", "postit", "text", "line", "connector"};
+    static const QStringList kinds{"rect", "ellipse", "triangle", "postit", "icon", "text", "line", "connector"};
     return kinds;
 }
 
@@ -43,6 +45,8 @@ QJsonObject itemToJson(const BoardItem &item) {
         o["color"] = item.color;
     if (item.kind == QLatin1String("text"))
         o["fontSize"] = item.fontSize;
+    if (item.kind == QLatin1String("icon"))
+        o["icon"] = item.icon;
     if (item.rotation != 0)
         o["rotation"] = item.rotation;
     return o;
@@ -78,6 +82,12 @@ BoardItem itemFromJson(const QJsonObject &o) {
     if (!palette().contains(item.color))
         item.color.clear();
     item.color = colorFor(item.kind, item.color);
+    // An icon this Slate doesn't know is shown as a question.
+    if (item.kind == QLatin1String("icon")) {
+        item.icon = o.value("icon").toString();
+        if (iconPath(item.icon).isEmpty())
+            item.icon = QStringLiteral("question");
+    }
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
@@ -202,7 +212,7 @@ int Board::rowCount(const QModelIndex &parent) const {
 QHash<int, QByteArray> Board::roleNames() const {
     return {{IdRole, "itemId"}, {KindRole, "kind"}, {XRole, "ix"}, {YRole, "iy"}, {WRole, "iw"}, {HRole, "ih"},
             {LabelRole, "label"}, {FillRole, "fill"}, {FontSizeRole, "fontSize"}, {SelectedRole, "selected"},
-            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}};
+            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"}};
 }
 
 QVariant Board::data(const QModelIndex &index, int role) const {
@@ -225,6 +235,7 @@ QVariant Board::data(const QModelIndex &index, int role) const {
     case X2Role: return line(item).x2();
     case Y2Role: return line(item).y2();
     case RotationRole: return item.rotation;
+    case IconRole: return item.icon;
     }
     return {};
 }
@@ -337,8 +348,27 @@ int Board::add(const QString &kind, double x, double y, double w, double h) {
     item.w = w;
     item.h = h;
     item.color = colorFor(kind, m_color);
+    if (kind == QLatin1String("icon"))
+        item.icon = QStringLiteral("star");
     const int id = insert(item);
     setSelection({id});
+    return id;
+}
+
+QStringList Board::iconNames() const {
+    return ::iconNames();
+}
+
+QString Board::iconPath(const QString &name) const {
+    return ::iconPath(name);
+}
+
+int Board::addIcon(const QString &name, double x, double y, double w, double h) {
+    if (::iconPath(name).isEmpty())
+        return 0;
+    const int id = add("icon", x, y, w, h);
+    m_items[row(id)].icon = name;
+    emit dataChanged(index(row(id)), index(row(id)), {IconRole});
     return id;
 }
 
@@ -991,7 +1021,7 @@ QVariantMap Board::item(int id) const {
         return {};
     return {{"id", item->id}, {"kind", item->kind}, {"x", item->x}, {"y", item->y}, {"w", item->w},
             {"h", item->h}, {"text", item->text}, {"color", item->color}, {"fontSize", item->fontSize},
-            {"rotation", item->rotation}};
+            {"rotation", item->rotation}, {"icon", item->icon}};
 }
 
 QPointF Board::edgePoint(int id, double towardX, double towardY) const {

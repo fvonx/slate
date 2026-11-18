@@ -15,10 +15,11 @@
 // ends are worked out from where they are now.
 struct BoardItem {
     int id = 0;
-    QString kind; // rect, ellipse, triangle, postit, text, line, connector
+    QString kind; // rect, ellipse, triangle, postit, icon, text, line, connector
     double x = 0, y = 0, w = 0, h = 0;
     QString text;
     QString color; // a theme palette key, or empty for the foreground
+    QString icon; // which icon, for an icon
     int fontSize = 24;
     double rotation = 0; // degrees, about the middle of its box
     int from = 0, to = 0;
@@ -28,7 +29,7 @@ struct BoardItem {
     bool isShape() const { return !isConnector() && !isLine(); }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
-            && color == o.color && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
+            && color == o.color && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
     }
 };
 
@@ -46,6 +47,7 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(QPointF selectionStart READ selectionStart NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QPointF selectionEnd READ selectionEnd NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString color READ color NOTIFY colorChanged)
+    Q_PROPERTY(QStringList iconNames READ iconNames CONSTANT)
     Q_PROPERTY(int groupCount READ groupCount NOTIFY selectionChanged)
     Q_PROPERTY(QRectF groupBounds READ movableBounds NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
@@ -59,7 +61,7 @@ class Board : public QAbstractListModel {
 public:
     enum Role {
         IdRole = Qt::UserRole + 1, KindRole, XRole, YRole, WRole, HRole, LabelRole, FillRole, FontSizeRole,
-        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole
+        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole
     };
 
     explicit Board(QObject *parent = nullptr);
@@ -82,6 +84,8 @@ public:
     // How many things are selected that can be moved or sized, connectors
     // aside: two or more are sized together, by the box around them.
     int groupCount() const;
+    QStringList iconNames() const;
+    Q_INVOKABLE QString iconPath(const QString &name) const;
     // The color the color menu marks: that of what is selected, when it all
     // has one ("mixed" when it doesn't), or the one new shapes will take.
     QString shownColor() const;
@@ -101,6 +105,7 @@ public:
     // itself. The live ones a gesture repeats (setGeometry, moveSelection,
     // setText, setFontSize) don't: the window checkpoints once as it starts.
     Q_INVOKABLE int add(const QString &kind, double x, double y, double w, double h);
+    Q_INVOKABLE int addIcon(const QString &name, double x, double y, double w, double h);
     Q_INVOKABLE int link(int from, int to);
     Q_INVOKABLE int linkToNew(int from, double x, double y);
     Q_INVOKABLE void setGeometry(int id, double x, double y, double w, double h);

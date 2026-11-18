@@ -437,6 +437,39 @@ private slots:
         QVERIFY(board.find(connector));
     }
 
+    void iconsArePlacedAndKept() {
+        Board board;
+        QVERIFY(board.iconNames().size() >= 20);
+        for (const QString &name : board.iconNames())
+            QVERIFY2(!board.iconPath(name).isEmpty(), qPrintable(name));
+        QCOMPARE(board.addIcon("unicorn", 0, 0, 64, 64), 0);
+
+        const int heart = board.addIcon("heart", 0, 0, 64, 64);
+        QCOMPARE(board.find(heart)->kind, QString("icon"));
+        QCOMPARE(board.find(heart)->icon, QString("heart"));
+        QVERIFY(board.isSelected(heart));
+        // Like any shape: colored, connected, hit inside, sized from its sides.
+        board.setSelectionColor("red");
+        QCOMPARE(board.find(heart)->color, QString("red"));
+        const int box = board.add("rect", 200, 0, 100, 100);
+        QVERIFY(board.link(heart, box) > 0);
+        QCOMPARE(board.itemAt(32, 32, 0), heart);
+        QCOMPARE(board.outlineSide(heart, 64, 32, 4), QString("r"));
+
+        // Kept with the board, copied with the clipboard; an icon this
+        // Slate doesn't know is shown as a question rather than as nothing.
+        Board again;
+        again.load(board.toJson());
+        QCOMPARE(again.find(heart)->icon, QString("heart"));
+        board.selectOnly(heart);
+        board.copy();
+        QVERIFY(board.paste(500, 500));
+        QCOMPARE(board.items().last().icon, QString("heart"));
+        again.load(QJsonObject{{"items", QJsonArray{QJsonObject{{"id", 1}, {"kind", "icon"}, {"icon", "unicorn"},
+                                                                {"w", 10}, {"h", 10}}}}});
+        QCOMPARE(again.find(1)->icon, QString("question"));
+    }
+
     void shapesComeToTheFrontAndGoToTheBack() {
         Board board;
         const int under = board.add("rect", 0, 0, 100, 100);
@@ -650,6 +683,7 @@ private slots:
         const int words = board->add("text", 300, 500, 90, 30);
         board->setText(words, "Loose words");
         board->link(plan, note);
+        board->addIcon("star", 500, 300, 64, 64);
 
         // Named after the board, with what a file name can't hold taken out.
         QVariantMap result = save("pdf");
@@ -1511,6 +1545,33 @@ private slots:
         QCOMPARE(board->items().last().id, first);
         QTest::keyClick(window, Qt::Key_BracketLeft);
         QCOMPARE(board->items().first().id, first);
+
+        // I opens the icons; one picked and a click on the canvas places it
+        // there, at a size to see, selected and ready to move or size.
+        auto *iconMenu = window->findChild<QObject *>("iconMenu");
+        QTest::keyClick(window, Qt::Key_I);
+        QTRY_VERIFY(iconMenu->property("opened").toBool());
+        auto *heartCell = visualChild(iconMenu->property("contentItem").value<QQuickItem *>(), "icon-heart");
+        QVERIFY(heartCell);
+        QTest::mouseClick(window, Qt::LeftButton, {}, heartCell->mapToScene({19, 19}).toPoint());
+        QCOMPARE(view->property("tool").toString(), QString("icon"));
+        QTRY_VERIFY(!iconMenu->property("visible").toBool());
+        QVERIFY(visualChild(window->contentItem(), "tool-icons")->property("active").toBool());
+        const int beforeIcon = board->count();
+        QTest::mouseClick(window, Qt::LeftButton, {}, {900, 150});
+        QCOMPARE(board->count(), beforeIcon + 1);
+        const BoardItem placed = board->items().last();
+        QCOMPARE(placed.kind, QString("icon"));
+        QCOMPARE(placed.icon, QString("heart"));
+        QCOMPARE(placed.w, 64.0);
+        QCOMPARE(QPointF(placed.x + 32, placed.y + 32), world({900, 150}));
+        QCOMPARE(board->selectedId(), placed.id);
+        QCOMPARE(view->property("tool").toString(), QString("select"));
+        QCOMPARE(view->property("handleList").toList().size(), 8);
+        // There is nothing to write on an icon.
+        QTest::mouseDClick(window, Qt::LeftButton, {}, {900, 150});
+        QVERIFY(!view->property("editing").toBool());
+        board->removeItem(placed.id);
 
         // A second board, and back.
         QTest::keySequence(window, QKeySequence("Ctrl+N"));

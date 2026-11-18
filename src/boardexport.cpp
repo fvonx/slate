@@ -7,9 +7,11 @@
 #include <QPdfWriter>
 #include <QSaveFile>
 #include <QSvgGenerator>
+#include <QSvgRenderer>
 #include <cmath>
 
 #include "board.h"
+#include "icons.h"
 
 namespace {
 
@@ -73,7 +75,16 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
     painter.rotate(item.rotation);
     painter.translate(-box.center());
 
-    if (item.kind == QLatin1String("text")) {
+    if (item.kind == QLatin1String("icon")) {
+        // The same outline the window draws, square in the middle of the
+        // icon's box, through Qt's own SVG renderer.
+        const QByteArray svg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='"
+                             + iconPath(item.icon).toLatin1() + "' fill='none' stroke='" + ink.name().toLatin1()
+                             + "' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/></svg>";
+        QSvgRenderer renderer(svg);
+        const double side = std::min(item.w, item.h);
+        renderer.render(&painter, QRectF(box.center().x() - side / 2, box.center().y() - side / 2, side, side));
+    } else if (item.kind == QLatin1String("text")) {
         painter.setFont(fontOf(item.fontSize));
         painter.setPen(ink);
         painter.drawText(QRectF(item.x, item.y, 100000, 100000), Qt::AlignLeft | Qt::AlignTop, item.text);

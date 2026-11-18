@@ -11,6 +11,7 @@ Everything stays on this machine, in `~/.local/share/slate/boards`, one JSON fil
 Press a key, drag, done. Drawing a shape drops you back into selecting, so the next thing you do is move it or write on it.
 
 - **Draw**: `R`, `O`, `T`, or `L`, then drag; the same four are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
+- **Icons**: `I` opens a menu of icons (star, check, warning, idea, person, clock and more); pick one and click or drag on the canvas. Icons move, size, turn, color, and connect like any other shape.
 - **Post-its**: `P` and a click sticks one under the pointer, ready to type on.
 - **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
 - **Turn**: hold `Alt` and drag any handle of the selected shape to rotate it. It catches on every 45° and on the angle of any other shape, and shows the angle beside the pointer. Shift turns in steps of 15°, `Ctrl` turns freely, and `,` and `.` turn from the keyboard.
@@ -25,6 +26,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | --- | --- |
 | `R` `O` `T` `L` | Draw a rectangle, circle, triangle, or line |
 | `P` | Stick a post-it |
+| `I` | Place an icon |
 | `X`, or `T` twice | Write text |
 | `C` | Connect two shapes |
 | `V`, `Esc` | Select and move |
