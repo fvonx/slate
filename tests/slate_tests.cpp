@@ -1131,6 +1131,27 @@ private slots:
                                 diagonalEnd + QPoint(-63, -60)});
         QVERIFY(std::abs(board->find(diagonal.id)->w) < 1e-9);
         QVERIFY(board->find(diagonal.id)->h < -100);
+        // Shift keeps a shape's proportions as it is resized. From a corner
+        // the way the pointer went furthest sets the size: half as wide
+        // again, so half as tall again, from the same top left.
+        QTest::mouseClick(window, Qt::LeftButton, {}, {180, 150});
+        QCOMPARE(board->selectedId(), rect.id);
+        shiftDrag({263, 203}, {{280, 205}, {320, 210}, {343, 213}});
+        QCOMPARE(board->find(rect.id)->w, 240.0);
+        QCOMPARE(board->find(rect.id)->h, 150.0);
+        QCOMPARE(board->find(rect.id)->x, rect.x);
+        QCOMPARE(board->find(rect.id)->y, rect.y);
+        QTest::keySequence(window, QKeySequence::Undo);
+        // From a side, the other way grows with it, evenly about the middle.
+        shiftDrag({263, 150}, {{280, 150}, {320, 151}, {343, 150}});
+        QCOMPARE(board->find(rect.id)->w, 240.0);
+        QCOMPARE(board->find(rect.id)->h, 150.0);
+        QCOMPARE(board->find(rect.id)->x, rect.x);
+        QCOMPARE(board->find(rect.id)->y, rect.y - 25);
+        QTest::keySequence(window, QKeySequence::Undo);
+        QCOMPARE(board->find(rect.id)->w, 160.0);
+        QCOMPARE(board->find(rect.id)->h, 100.0);
+
         // Without Shift it goes where it is put.
         QTest::keyClick(window, Qt::Key_L);
         drag({100, 560}, {300, 571});

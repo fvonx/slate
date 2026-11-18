@@ -588,15 +588,33 @@ Item {
             // a shape can be made to end where its neighbors do. A turned
             // shape's sides run at an angle to all that and are left alone,
             // and Ctrl lets any shape be sized freely.
+            //
+            // Shift keeps the shape's proportions. From a corner, the way the
+            // pointer has gone furthest sets the size and the other follows;
+            // from a side, the other way grows with it, evenly about the
+            // middle. Only the side that leads catches on its neighbors.
+            const keep = shift && b.width > 0 && b.height > 0
+            let useX = !tall, useY = !wide
+            if (keep && !tall && !wide) {
+                useX = Math.abs(dx) / b.width >= Math.abs(dy) / b.height
+                useY = !useX
+            }
             let lines = []
             if (rot === 0 && !(m.modifiers & Qt.ControlModifier)) {
-                const snap = board.snapEdges(anchor.x + dx, anchor.y + dy, !tall, !wide, 6 / zoom)
+                const snap = board.snapEdges(anchor.x + dx, anchor.y + dy, useX, useY, 6 / zoom)
                 dx += snap.dx
                 dy += snap.dy
                 lines = snap.guides
             }
             guides = lines
-            const w = tall ? b.width : Math.max(8, Math.abs(dx)), h = wide ? b.height : Math.max(8, Math.abs(dy))
+            let w = tall ? b.width : Math.max(8, Math.abs(dx)), h = wide ? b.height : Math.max(8, Math.abs(dy))
+            if (keep) {
+                let scale = wide ? w / b.width : tall ? h / b.height
+                          : useX ? Math.abs(dx) / b.width : Math.abs(dy) / b.height
+                scale = Math.max(scale, 8 / Math.min(b.width, b.height))
+                w = b.width * scale
+                h = b.height * scale
+            }
             const mid = spin(anchor.x + (tall ? 0 : (dx < 0 ? -w : w) / 2),
                              anchor.y + (wide ? 0 : (dy < 0 ? -h : h) / 2), anchor.x, anchor.y, rot)
             board.setGeometry(id, mid.x - w / 2, mid.y - h / 2, w, h)
