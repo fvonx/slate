@@ -542,6 +542,67 @@ void Board::sendToBack() {
     reorderSelection(false);
 }
 
+int Board::groupCount() const {
+    int n = 0;
+    for (const BoardItem &item : m_items)
+        n += m_selected.contains(item.id) && !item.isConnector();
+    return n;
+}
+
+void Board::beginScale() {
+    m_scaleFrom = movableBounds();
+    m_scaleItems.clear();
+    for (const BoardItem &item : m_items)
+        if (m_selected.contains(item.id) && !item.isConnector())
+            m_scaleItems.append(item);
+}
+
+// Everything selected is stretched with the box around it: where each thing
+// sits within the box, and how large it is. Worked out every time from the
+// things as they were when the sizing began, so nothing drifts however long
+// the drag. A turned shape is stretched along its own sides by as much as
+// the box is along them; lines move their ends; text grows its type.
+void Board::scaleSelectionTo(double x, double y, double w, double h) {
+    if (m_scaleItems.isEmpty())
+        return;
+    const QRectF from = m_scaleFrom;
+    const double sx = from.width() > 1e-9 ? w / from.width() : 1;
+    const double sy = from.height() > 1e-9 ? h / from.height() : 1;
+    auto map = [&](const QPointF &p) {
+        return QPointF(x + (p.x() - from.x()) * sx, y + (p.y() - from.y()) * sy);
+    };
+    QSet<int> scaled;
+    for (const BoardItem &was : std::as_const(m_scaleItems)) {
+        const int r = row(was.id);
+        if (r < 0)
+            continue;
+        BoardItem &item = m_items[r];
+        if (item.isLine()) {
+            const QPointF a = map({was.x, was.y}), b = map({was.x + was.w, was.y + was.h});
+            item.x = a.x();
+            item.y = a.y();
+            item.w = b.x() - a.x();
+            item.h = b.y() - a.y();
+        } else {
+            const double turn = was.rotation * M_PI / 180, c = std::cos(turn), s = std::sin(turn);
+            const double alongW = item.kind == QLatin1String("text") ? std::sqrt(sx * sy) : std::hypot(sx * c, sy * s);
+            const double alongH = item.kind == QLatin1String("text") ? std::sqrt(sx * sy) : std::hypot(sx * s, sy * c);
+            const QPointF middle = map({was.x + was.w / 2, was.y + was.h / 2});
+            item.w = std::max(1.0, was.w * alongW);
+            item.h = std::max(1.0, was.h * alongH);
+            item.x = middle.x() - item.w / 2;
+            item.y = middle.y() - item.h / 2;
+            if (item.kind == QLatin1String("text") && item.fontSize != std::clamp(int(std::lround(was.fontSize * alongW)), 8, 400)) {
+                item.fontSize = std::clamp(int(std::lround(was.fontSize * alongW)), 8, 400);
+                emit dataChanged(index(r), index(r), {FontSizeRole});
+            }
+        }
+        scaled.insert(item.id);
+    }
+    geometryChanged(scaled);
+    emit changed();
+}
+
 // A text item is as large as its text, which only the window can measure. It
 // reports back from a delegate that may be in the middle of being created, so
 // the model changes on the next turn of the event loop rather than under it.

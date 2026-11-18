@@ -399,6 +399,44 @@ private slots:
         QVERIFY(board.snapEdges(240, 150, true, true, 6).value("guides").toList().isEmpty());
     }
 
+    void severalThingsAreSizedTogether() {
+        Board board;
+        const int box = board.add("rect", 0, 0, 100, 50);
+        const int bar = board.add("rect", 200, 0, 100, 20);
+        board.setRotation(bar, 90);
+        const int line = board.add("line", 0, 100, 100, 0);
+        const int words = board.add("text", 200, 100, 40, 20);
+        board.setFontSize(words, 20);
+        const int connector = board.link(box, bar);
+        board.selectAll();
+        QCOMPARE(board.groupCount(), 4);
+        const QRectF from = board.movableBounds();
+
+        // Twice as wide, as tall as before.
+        board.beginScale();
+        board.scaleSelectionTo(from.x(), from.y(), from.width() * 2, from.height());
+        QCOMPARE(board.find(box)->w, 200.0);
+        QCOMPARE(board.find(box)->h, 50.0);
+        // The bar stands on its end, so its own width runs up and down and
+        // stays; its thickness, across, doubles.
+        QCOMPARE(board.find(bar)->w, 100.0);
+        QCOMPARE(board.find(bar)->h, 40.0);
+        QCOMPARE(board.find(line)->w, 200.0);
+        QCOMPARE(board.find(line)->h, 0.0);
+        // The box around them is twice as wide, from the same left.
+        const QRectF to = board.movableBounds();
+        QVERIFY(std::abs(to.left() - from.left()) < 1e-6);
+        QVERIFY(std::abs(to.width() - from.width() * 2) < 1e-6);
+        // Each step works from where things were, so going back is exact.
+        board.scaleSelectionTo(from.x(), from.y(), from.width(), from.height());
+        QCOMPARE(board.find(box)->w, 100.0);
+        QCOMPARE(board.find(bar)->h, 20.0);
+        // Text grows its type, evenly.
+        board.scaleSelectionTo(from.x(), from.y(), from.width() * 2, from.height() * 2);
+        QCOMPARE(board.find(words)->fontSize, 40);
+        QVERIFY(board.find(connector));
+    }
+
     void shapesComeToTheFrontAndGoToTheBack() {
         Board board;
         const int under = board.add("rect", 0, 0, 100, 100);
@@ -1151,6 +1189,36 @@ private slots:
         QTest::keySequence(window, QKeySequence::Undo);
         QCOMPARE(board->find(rect.id)->w, 160.0);
         QCOMPARE(board->find(rect.id)->h, 100.0);
+
+        // Several shapes selected are sized together by the box around them:
+        // the rectangle and the circle, half as large again from the box's
+        // top left, each where it was within the box, and one step to undo.
+        QTest::mouseClick(window, Qt::LeftButton, Qt::ShiftModifier, {500, 150});
+        QCOMPARE(board->groupCount(), 2);
+        QCOMPARE(view->property("handleList").toList().size(), 8);
+        QVERIFY(window->findChild<QQuickItem *>("groupBox")->isVisible());
+        const BoardItem round = *board->find(circle.id);
+        QTest::mousePress(window, Qt::LeftButton, {}, {563, 213});
+        for (const QPoint &p : {QPoint(600, 225), QPoint(700, 250), QPoint(793, 273)})
+            QTest::mouseMove(window, p);
+        QTest::mouseRelease(window, Qt::LeftButton, {}, {793, 273});
+        QCOMPARE(board->find(rect.id)->w, 240.0);
+        QCOMPARE(board->find(rect.id)->h, 150.0);
+        QCOMPARE(board->find(rect.id)->x, rect.x);
+        QCOMPARE(board->find(rect.id)->y, round.y + (rect.y - round.y) * 1.5);
+        QCOMPARE(board->find(circle.id)->w, 180.0);
+        QCOMPARE(board->find(circle.id)->x, rect.x + (round.x - rect.x) * 1.5);
+        QCOMPARE(board->find(circle.id)->y, round.y);
+        QCOMPARE(board->groupCount(), 2);
+        // Moving them together is as before.
+        drag({300, 200}, {320, 200});
+        QCOMPARE(board->find(rect.id)->x, rect.x + 20);
+        QCOMPARE(board->find(rect.id)->w, 240.0);
+        QTest::keySequence(window, QKeySequence::Undo);
+        QTest::keySequence(window, QKeySequence::Undo);
+        QCOMPARE(board->find(rect.id)->w, 160.0);
+        QCOMPARE(board->find(circle.id)->x, round.x);
+        board->clearSelection();
 
         // Without Shift it goes where it is put.
         QTest::keyClick(window, Qt::Key_L);

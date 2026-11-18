@@ -12,7 +12,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 
 - **Draw**: `R`, `O`, `T`, or `L`, then drag; the same four are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
 - **Post-its**: `P` and a click sticks one under the pointer, ready to type on.
-- **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions.
+- **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
 - **Turn**: hold `Alt` and drag any handle of the selected shape to rotate it. It catches on every 45° and on the angle of any other shape, and shows the angle beside the pointer. Shift turns in steps of 15°, `Ctrl` turns freely, and `,` and `.` turn from the keyboard.
 - **Snap**: a shape you drag catches on the sides and middles of the shapes it passes, and so does a side or corner you resize, with a guide line showing what it lined up with. Hold `Ctrl` to place or size it freely.
 - **Arrange**: select several shapes and press `Alt` with an arrow to line them up on that side; `]` and `[` bring the selection to the front or send it to the back. The toolbar's arrange menu has the same.

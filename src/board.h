@@ -46,6 +46,8 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(QPointF selectionStart READ selectionStart NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QPointF selectionEnd READ selectionEnd NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString color READ color NOTIFY colorChanged)
+    Q_PROPERTY(int groupCount READ groupCount NOTIFY selectionChanged)
+    Q_PROPERTY(QRectF groupBounds READ movableBounds NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
@@ -77,6 +79,9 @@ public:
     QPointF selectionStart() const;
     QPointF selectionEnd() const;
     QString color() const { return m_color; }
+    // How many things are selected that can be moved or sized, connectors
+    // aside: two or more are sized together, by the box around them.
+    int groupCount() const;
     // The color the color menu marks: that of what is selected, when it all
     // has one ("mixed" when it doesn't), or the one new shapes will take.
     QString shownColor() const;
@@ -104,6 +109,10 @@ public:
     Q_INVOKABLE void setFontSize(int id, int size);
     Q_INVOKABLE void setRotation(int id, double degrees);
     Q_INVOKABLE void rotateSelection(double degrees);
+    // Sizing several things at once: remember them as they are, then put
+    // them, each time the pointer moves, in a new box in place of the old.
+    Q_INVOKABLE void beginScale();
+    Q_INVOKABLE void scaleSelectionTo(double x, double y, double w, double h);
     Q_INVOKABLE void alignSelection(const QString &edge);
     Q_INVOKABLE void bringToFront();
     Q_INVOKABLE void sendToBack();
@@ -176,6 +185,8 @@ private:
     bool insertJson(const QJsonArray &array, const QPointF &center, bool atCenter);
 
     QVector<BoardItem> m_items;
+    QVector<BoardItem> m_scaleItems;
+    QRectF m_scaleFrom;
     QHash<int, int> m_rows;
     QSet<int> m_selected;
     int m_nextId = 1;

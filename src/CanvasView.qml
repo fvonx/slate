@@ -240,8 +240,23 @@ Item {
     // --- Pointer -------------------------------------------------------------
 
     readonly property var handleList: {
-        if (!board.selectedId || mode === "move" || editing || tool !== "select")
+        if (mode === "move" || editing || tool !== "select")
             return []
+        // Several things selected are sized together, by the box around them.
+        if (!board.selectedId) {
+            if (board.groupCount < 2)
+                return []
+            const g = board.groupBounds
+            const l = sx(g.x) - 3, t = sy(g.y) - 3, r = sx(g.x + g.width) + 3, bt = sy(g.y + g.height) + 3
+            const cx = (l + r) / 2, cy = (t + bt) / 2
+            const group = [{ x: l, y: t, corner: 0, group: true }, { x: r, y: t, corner: 1, group: true },
+                           { x: l, y: bt, corner: 2, group: true }, { x: r, y: bt, corner: 3, group: true }]
+            if (r - l >= 44)
+                group.push({ x: cx, y: t, edge: "t", group: true }, { x: cx, y: bt, edge: "b", group: true })
+            if (bt - t >= 44)
+                group.push({ x: l, y: cy, edge: "l", group: true }, { x: r, y: cy, edge: "r", group: true })
+            return group
+        }
         const k = board.selectedKind
         if (k === "connector")
             return []
@@ -417,6 +432,19 @@ Item {
         const shift = (m.modifiers & Qt.ShiftModifier) !== 0
         if (tool === "select") {
             const handle = nearest(handleList, pointer, 10)
+            if (handle && handle.group) {
+                const g = board.groupBounds, c = handle.corner, side = handle.edge || ""
+                // The spot taken hold of on the box follows the pointer from
+                // where it was, as on a single shape.
+                const hx = side === "l" || (!side && !(c & 1)) ? g.x : side === "r" || (!side && (c & 1)) ? g.x + g.width : p.x
+                const hy = side === "t" || (!side && !(c & 2)) ? g.y : side === "b" || (!side && (c & 2)) ? g.y + g.height : p.y
+                grabOffset = Qt.point(hx - p.x, hy - p.y)
+                activeHandle = handle
+                startBox = g
+                board.beginScale()
+                mode = "scale"
+                return
+            }
             // Alt on any handle of a shape turns it about its middle, from
             // the angle it was taken hold of at.
             if (handle && handle.end === undefined && (m.modifiers & Qt.AltModifier)) {
@@ -618,6 +646,42 @@ Item {
             const mid = spin(anchor.x + (tall ? 0 : (dx < 0 ? -w : w) / 2),
                              anchor.y + (wide ? 0 : (dy < 0 ? -h : h) / 2), anchor.x, anchor.y, rot)
             board.setGeometry(id, mid.x - w / 2, mid.y - h / 2, w, h)
+        } else if (mode === "scale") {
+            if (first)
+                board.checkpoint()
+            const b = startBox, c = activeHandle.corner, side = activeHandle.edge || ""
+            const wide = side === "l" || side === "r", tall = side === "t" || side === "b"
+            // The side or corner across from the one held stays put; the box
+            // never turns inside out, only down to a sliver.
+            const leftHeld = side === "l" || (!side && !(c & 1)), topHeld = side === "t" || (!side && !(c & 2))
+            const ax = leftHeld ? b.x + b.width : b.x, ay = topHeld ? b.y + b.height : b.y
+            const dirX = leftHeld ? -1 : 1, dirY = topHeld ? -1 : 1
+            let dx = p.x + grabOffset.x - ax, dy = p.y + grabOffset.y - ay
+            const keep = shift && b.width > 0 && b.height > 0
+            let useX = !tall, useY = !wide
+            if (keep && !tall && !wide) {
+                useX = Math.abs(dx) / b.width >= Math.abs(dy) / b.height
+                useY = !useX
+            }
+            let lines = []
+            if (!(m.modifiers & Qt.ControlModifier)) {
+                const snap = board.snapEdges(ax + dx, ay + dy, useX, useY, 6 / zoom)
+                dx += snap.dx
+                dy += snap.dy
+                lines = snap.guides
+            }
+            guides = lines
+            let w = tall ? b.width : Math.max(8, dx * dirX), h = wide ? b.height : Math.max(8, dy * dirY)
+            if (keep) {
+                let scale = wide ? w / b.width : tall ? h / b.height : useX ? w / b.width : h / b.height
+                scale = Math.max(scale, 8 / Math.max(1, Math.min(b.width, b.height)))
+                w = b.width * scale
+                h = b.height * scale
+            }
+            // From a side, the other way stays centred where it was.
+            const x = tall ? b.x + (b.width - w) / 2 : dirX > 0 ? ax : ax - w
+            const y = wide ? b.y + (b.height - h) / 2 : dirY > 0 ? ay : ay - h
+            board.scaleSelectionTo(x, y, w, h)
         } else if (mode === "rotate") {
             if (first)
                 board.checkpoint()
@@ -1020,6 +1084,19 @@ Item {
         }
     }
 
+    // The box around several selected things, which sizes them together.
+    Rectangle {
+        objectName: "groupBox"
+        visible: board.groupCount > 1 && view.tool === "select" && !view.editing
+        x: Math.round(view.sx(board.groupBounds.x)) - 3
+        y: Math.round(view.sy(board.groupBounds.y)) - 3
+        width: board.groupBounds.width * view.zoom + 6
+        height: board.groupBounds.height * view.zoom + 6
+        color: "transparent"
+        border.color: theme.accent
+        border.width: 1
+    }
+
     // What the dragged selection is lined up with.
     Repeater {
         model: view.guides
@@ -1117,8 +1194,10 @@ Item {
                    : view.mode === "resize" && view.activeHandle.edge
                      ? view.edgeCursor(view.activeHandle.edge, board.selectedRotation)
                    : view.mode === "rotate" ? Qt.ClosedHandCursor
-                   : view.mode === "resize" || view.mode === "endpoint" ? view.handleCursor(view.activeHandle)
+                   : view.mode === "resize" || view.mode === "endpoint" || view.mode === "scale"
+                     ? view.handleCursor(view.activeHandle)
                    : view.mode === "" && view.hoverHandle && view.altHeld && view.hoverHandle.end === undefined
+                     && !view.hoverHandle.group
                      ? Qt.OpenHandCursor
                    : view.mode === "" && view.hoverHandle ? view.handleCursor(view.hoverHandle)
                    : view.mode === "" && view.hoverEdge ? view.edgeCursor(view.hoverEdge, view.hoverEdgeRotation)
