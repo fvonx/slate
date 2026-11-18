@@ -11,6 +11,7 @@ Everything stays on this machine, in `~/.local/share/slate/boards`, one JSON fil
 Press a key, drag, done. Drawing a shape drops you back into selecting, so the next thing you do is move it or write on it.
 
 - **Draw**: `R`, `O`, `T`, or `L`, then drag; the same four are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
+- **Frames**: `F`, or the shapes menu, and drag to draw a frame: a named area that holds what lies inside it. Move the frame, by its name or once it is selected, and everything in it moves along; delete or copy it and its contents go too. Double-click the name to rename it. A drag inside a frame that isn't selected draws a selection band, and a click there selects the frame.
 - **Icons**: `I` opens a menu of icons (star, check, warning, idea, person, clock and more); pick one and click or drag on the canvas. Icons move, size, turn, color, and connect like any other shape.
 - **Post-its**: `P` and a click sticks one under the pointer, ready to type on.
 - **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
@@ -25,6 +26,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | Key | Action |
 | --- | --- |
 | `R` `O` `T` `L` | Draw a rectangle, circle, triangle, or line |
+| `F` | Draw a frame |
 | `P` | Stick a post-it |
 | `I` | Place an icon |
 | `X`, or `T` twice | Write text |
@@ -43,7 +45,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | `Alt+H` `Alt+V` | Center the selected shapes on each other, horizontally or vertically |
 | `]` `[` | Bring to the front, send to the back |
 | `+` `-` `0` | Zoom in, out, and back to 100% |
-| `F` | Fit everything in the window |
+| `Shift+F` | Fit everything in the window |
 | `Space` | Hold and drag to pan |
 | `B` | Open the boards menu at the top left |
 | `Ctrl+N` | New board |

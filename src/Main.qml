@@ -31,7 +31,8 @@ ApplicationWindow {
         { tool: "rect", key: "R", label: qsTr("Rectangle"), icon: "M3 4.5 H17 V15.5 H3 Z" },
         { tool: "ellipse", key: "O", label: qsTr("Circle"), icon: "M10 3 A7 7 0 1 0 10 17 A7 7 0 1 0 10 3 Z" },
         { tool: "triangle", key: "T", label: qsTr("Triangle"), icon: "M10 3 L17.5 16.5 H2.5 Z" },
-        { tool: "line", key: "L", label: qsTr("Line"), icon: "M3 17 L17 3" }
+        { tool: "line", key: "L", label: qsTr("Line"), icon: "M3 17 L17 3" },
+        { tool: "frame", key: "F", label: qsTr("Frame"), icon: "M6 2 V18 M14 2 V18 M2 6 H18 M2 14 H18" }
     ]
     // What each icon is called, for the menu's tooltips.
     readonly property var iconLabels: ({
@@ -98,6 +99,7 @@ ApplicationWindow {
     Shortcut { sequence: "T"; enabled: win.keys; onActivated: view.tool = view.tool === "triangle" ? "text" : "triangle" }
     Shortcut { sequence: "X"; enabled: win.keys; onActivated: view.tool = "text" }
     Shortcut { sequence: "L"; enabled: win.keys; onActivated: view.tool = "line" }
+    Shortcut { sequence: "F"; enabled: win.keys; onActivated: view.tool = "frame" }
     Shortcut { sequence: "P"; enabled: win.keys; onActivated: view.tool = "postit" }
     Shortcut { sequence: "I"; enabled: win.keys; onActivated: iconMenu.visible ? iconMenu.close() : iconMenu.open() }
     Shortcut { sequence: ","; enabled: win.keys; onActivated: board.rotateSelection(-15) }
@@ -157,7 +159,7 @@ ApplicationWindow {
     Shortcut { sequences: ["+", "="]; enabled: win.keys; onActivated: view.zoomAt(view.focusPoint(), 1.25, true) }
     Shortcut { sequence: "-"; enabled: win.keys; onActivated: view.zoomAt(view.focusPoint(), 0.8, true) }
     Shortcut { sequence: "0"; enabled: win.keys; onActivated: view.resetZoom() }
-    Shortcut { sequence: "F"; enabled: win.keys; onActivated: view.fit() }
+    Shortcut { sequence: "Shift+F"; enabled: win.keys; onActivated: view.fit() }
 
     Shortcut { sequence: "1"; enabled: win.keys; onActivated: win.paint(0) }
     Shortcut { sequence: "2"; enabled: win.keys; onActivated: win.paint(1) }
@@ -1123,6 +1125,7 @@ ApplicationWindow {
         Overlay.modal: Rectangle { color: Qt.alpha("black", 0.45) }
         readonly property var entries: [
             { keys: "R  O  T  L", action: qsTr("Draw a rectangle, circle, triangle or line") },
+            { keys: "F", action: qsTr("Draw a frame; what lies inside it moves with it") },
             { keys: "P", action: qsTr("Stick a post-it") },
             { keys: "I", action: qsTr("Place an icon") },
             { keys: "X · T T", action: qsTr("Write text") },
@@ -1144,7 +1147,7 @@ ApplicationWindow {
             { keys: "Alt+H · Alt+V", action: qsTr("Center the selected shapes on each other, across or up and down") },
             { keys: "]  [", action: qsTr("Bring to the front or send to the back") },
             { keys: "+  −  0", action: qsTr("Zoom in, out, and back to 100%") },
-            { keys: "F", action: qsTr("Fit everything in the window") },
+            { keys: "Shift+F", action: qsTr("Fit everything in the window") },
             { keys: "Space", action: qsTr("Hold and drag to pan") },
             { keys: "B", action: qsTr("Show or hide the boards") },
             { keys: "Ctrl+N", action: qsTr("New board") },

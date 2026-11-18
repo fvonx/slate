@@ -48,6 +48,10 @@ Item {
     property point startB
     property bool bandAdd: false
     property rect bandRect
+    // The frame a band was started inside of, which a click selects.
+    property int bandFrame: 0
+    // How tall a frame's name is on screen, above its top.
+    readonly property real frameLabelHeight: 24
     // Where the selection was when its drag began, and the lines it is
     // lined up on now.
     property rect moveStart
@@ -206,7 +210,7 @@ Item {
         editingKind = it.kind
         editBox = Qt.rect(it.x, it.y, it.w, it.h)
         editRotation = it.rotation
-        editor.font.pixelSize = it.kind === "text" ? it.fontSize : 18
+        editor.font.pixelSize = it.kind === "text" ? it.fontSize : it.kind === "frame" ? 13 : 18
         editor.text = it.text
         editingId = id
         recolorEditor()
@@ -220,7 +224,7 @@ Item {
         if (!editing)
             return
         const it = board.item(editingId)
-        editor.color = it.kind === "text" ? inkOf(it.color)
+        editor.color = it.kind === "text" ? inkOf(it.color) : it.kind === "frame" ? theme.accent
                      : it.kind === "postit" ? readable(paperOf(it.color)) : theme.foreground
     }
     Connections {
@@ -448,8 +452,9 @@ Item {
                 return
             }
             // Alt on any handle of a shape turns it about its middle, from
-            // the angle it was taken hold of at.
-            if (handle && handle.end === undefined && (m.modifiers & Qt.AltModifier)) {
+            // the angle it was taken hold of at. A frame stays upright.
+            if (handle && handle.end === undefined && (m.modifiers & Qt.AltModifier)
+                    && board.selectedKind !== "frame") {
                 activeHandle = handle
                 startBox = board.selectedBox
                 startRotation = board.selectedRotation
@@ -504,8 +509,20 @@ Item {
                 mode = "connect"
                 return
             }
-            const id = board.itemAt(p.x, p.y, 6 / zoom)
-            if (id) {
+            // A frame is taken hold of by its name. The open inside of one
+            // that isn't selected is like the canvas: a drag there draws a
+            // band to pick out what is in it, and a click selects the frame.
+            const named = board.frameLabelAt(p.x, p.y, frameLabelHeight / zoom)
+            const id = named || board.itemAt(p.x, p.y, 6 / zoom)
+            bandFrame = 0
+            if (id && !named && !board.isSelected(id) && board.item(id).kind === "frame") {
+                if (!shift)
+                    board.clearSelection()
+                bandAdd = shift
+                bandRect = Qt.rect(0, 0, 0, 0)
+                bandFrame = id
+                mode = "band"
+            } else if (id) {
                 if (shift)
                     board.toggle(id)
                 else if (!board.isSelected(id))
@@ -556,6 +573,7 @@ Item {
         } else if (mode === "move") {
             if (first) {
                 board.checkpoint()
+                board.beginMove()
                 moveStart = board.movableBounds()
             }
             // Where the pointer alone would put the selection, and from
@@ -742,12 +760,21 @@ Item {
         const was = mode
         mode = ""
         guides = []
-        if (was === "draw") {
+        if (was === "move") {
+            board.endMove()
+        } else if (was === "band" && !moved && bandFrame) {
+            if (bandAdd)
+                board.toggle(bandFrame)
+            else
+                board.selectOnly(bandFrame)
+            bandFrame = 0
+        } else if (was === "draw") {
             // A click drops the shape at a comfortable size around the pointer.
             if (!drawId && tool !== "line") {
-                const w = tool === "rect" ? 160 : tool === "postit" ? 150 : tool === "icon" ? 64 : 120
+                const w = tool === "rect" ? 160 : tool === "postit" ? 150 : tool === "icon" ? 64
+                        : tool === "frame" ? 480 : 120
                 const h = tool === "rect" ? 100 : tool === "triangle" ? 110 : tool === "postit" ? 150
-                        : tool === "icon" ? 64 : 120
+                        : tool === "icon" ? 64 : tool === "frame" ? 320 : 120
                 drawId = tool === "icon" ? board.addIcon(iconName, p.x - w / 2, p.y - h / 2, w, h)
                                          : board.add(tool, p.x - w / 2, p.y - h / 2, w, h)
             }
@@ -781,7 +808,11 @@ Item {
             return
         const p = toWorld(Qt.point(m.x, m.y))
         mode = ""
-        const id = board.itemAt(p.x, p.y, 6 / zoom)
+        // A frame's name is renamed where it is; inside a frame, as on the
+        // canvas, a double click writes.
+        const named = board.frameLabelAt(p.x, p.y, frameLabelHeight / zoom)
+        const hit = board.itemAt(p.x, p.y, 6 / zoom)
+        const id = named || (hit && board.item(hit).kind !== "frame" ? hit : 0)
         if (id)
             beginEdit(id)
         else
@@ -856,6 +887,41 @@ Item {
                             border.color: rectBody.ink
                             border.width: 2
                             radius: Math.min(theme.radius, width / 2, height / 2)
+                        }
+                    }
+                }
+
+                DelegateChoice {
+                    roleValue: "frame"
+                    Body {
+                        id: frameBody
+                        objectName: "frame-" + itemId
+                        zoom: view.zoom
+                        editingId: view.editingId
+                        showsLabel: false
+                        // Beneath everything, even the connectors.
+                        z: -1
+                        Rectangle {
+                            anchors.fill: parent
+                            z: -1
+                            color: Qt.tint(theme.background, Qt.alpha(frameBody.ink, frameBody.fill ? 0.16 : 0.035))
+                            border.color: Qt.alpha(frameBody.ink, frameBody.fill ? 0.8 : 0.3)
+                            border.width: 1.5
+                            radius: Math.min(theme.radius, width / 2, height / 2)
+                        }
+                        // The name, above the top left corner, the same size at
+                        // any zoom and cut short at the frame's width.
+                        Text {
+                            objectName: "frameName"
+                            transformOrigin: Item.TopLeft
+                            scale: 1 / view.zoom
+                            y: -(view.frameLabelHeight - 4) / view.zoom
+                            width: frameBody.width * view.zoom
+                            visible: view.editingId !== frameBody.itemId
+                            text: frameBody.label || qsTr("Frame")
+                            elide: Text.ElideRight
+                            color: frameBody.selected ? theme.accent : Qt.alpha(theme.foreground, 0.7)
+                            font.pixelSize: 13
                         }
                     }
                 }
@@ -1049,14 +1115,21 @@ Item {
             visible: view.editing
             readonly property bool note: view.editingKind === "text"
             readonly property bool triangle: view.editingKind === "triangle"
+            // A frame's name is written where it is shown, above the frame and
+            // the same size at any zoom.
+            readonly property bool name: view.editingKind === "frame"
+            readonly property bool free: note || name
             readonly property real room: triangle ? view.editBox.width / 2 : view.editBox.width - 16
-            x: note ? view.editBox.x : view.editBox.x + (view.editBox.width - room) / 2
-            y: note ? view.editBox.y
+            transformOrigin: Item.TopLeft
+            scale: name ? 1 / view.zoom : 1
+            x: free ? view.editBox.x : view.editBox.x + (view.editBox.width - room) / 2
+            y: name ? view.editBox.y - (view.frameLabelHeight - 4) / view.zoom
+             : note ? view.editBox.y
                     : view.editBox.y + (view.editBox.height - height) / 2 + (triangle ? view.editBox.height / 6 : 0)
             // Text is as wide as its words; a label wraps inside its shape.
-            width: note ? undefined : room
-            horizontalAlignment: note ? TextEdit.AlignLeft : TextEdit.AlignHCenter
-            wrapMode: note ? TextEdit.NoWrap : TextEdit.Wrap
+            width: free ? undefined : room
+            horizontalAlignment: free ? TextEdit.AlignLeft : TextEdit.AlignHCenter
+            wrapMode: free ? TextEdit.NoWrap : TextEdit.Wrap
             selectionColor: theme.accent
             selectedTextColor: theme.accentForeground
             selectByMouse: true
@@ -1230,7 +1303,7 @@ Item {
                    : view.mode === "resize" || view.mode === "endpoint" || view.mode === "scale"
                      ? view.handleCursor(view.activeHandle)
                    : view.mode === "" && view.hoverHandle && view.altHeld && view.hoverHandle.end === undefined
-                     && !view.hoverHandle.group
+                     && !view.hoverHandle.group && board.selectedKind !== "frame"
                      ? Qt.OpenHandCursor
                    : view.mode === "" && view.hoverHandle ? view.handleCursor(view.hoverHandle)
                    : view.mode === "" && view.hoverEdge ? view.edgeCursor(view.hoverEdge, view.hoverEdgeRotation)
@@ -1297,6 +1370,7 @@ Item {
         property real zoom: 1
         property int editingId: 0
         property color labelColor: theme.foreground
+        property bool showsLabel: true
         property real labelOffset: 0
         property real labelWidth: width - 16
         // A colored shape is tinted with its color, over the background so it
@@ -1314,7 +1388,7 @@ Item {
             anchors.centerIn: parent
             anchors.verticalCenterOffset: body.labelOffset
             width: Math.max(0, body.labelWidth)
-            visible: body.editingId !== body.itemId
+            visible: body.showsLabel && body.editingId !== body.itemId
             text: body.label
             color: body.labelColor
             font.pixelSize: 18

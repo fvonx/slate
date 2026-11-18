@@ -470,6 +470,119 @@ private slots:
         QCOMPARE(again.find(1)->icon, QString("question"));
     }
 
+    void framesHoldWhatIsInThem() {
+        Board board;
+        const int inside = board.add("rect", 0, 0, 100, 100);
+        const int line = board.add("line", 150, 150, 50, 0);
+        const int outside = board.add("rect", 500, 0, 50, 50);
+        const int frame = board.add("frame", -50, -50, 400, 300);
+        // Named in turn, upright, and drawn beneath what it holds.
+        QCOMPARE(board.find(frame)->text, QString("Frame 1"));
+        QCOMPARE(board.items().first().id, frame);
+        QCOMPARE(board.itemAt(10, 10, 0), inside);
+        QCOMPARE(board.itemAt(300, 200, 0), frame);
+        QCOMPARE(board.contents(frame), QSet<int>({inside, line}));
+        // Taken hold of by its name, above its top left corner.
+        QCOMPARE(board.frameLabelAt(10, -60, 24), frame);
+        QCOMPARE(board.frameLabelAt(10, -80, 24), 0);
+        // It holds things rather than joins them, and doesn't turn.
+        QCOMPARE(board.shapeAt(300, 200, 0), 0);
+        QCOMPARE(board.link(frame, outside), 0);
+        board.selectOnly(frame);
+        board.rotateSelection(15);
+        QCOMPARE(board.find(frame)->rotation, 0.0);
+
+        // Dragged, it takes along what was in it as the drag began, and
+        // nothing it passes over on the way.
+        board.beginMove();
+        board.moveSelection(200, 0);
+        board.moveSelection(100, 0);
+        board.endMove();
+        QCOMPARE(board.find(frame)->x, 250.0);
+        QCOMPARE(board.find(inside)->x, 300.0);
+        QCOMPARE(board.find(line)->x, 450.0);
+        QCOMPARE(board.find(outside)->x, 500.0);
+        // Now that it lies on the frame, the other shape is in it too.
+        QVERIFY(board.contents(frame).contains(outside));
+        board.moveSelection(-300, 0);
+        QCOMPARE(board.find(outside)->x, 200.0);
+        QCOMPARE(board.find(inside)->x, 0.0);
+
+        // A band inside it picks out what is in it, not the frame; a band
+        // around it all takes the frame too.
+        board.selectInRect(-10, -10, 120, 120, false);
+        QCOMPARE(board.selectedId(), inside);
+        board.selectInRect(-100, -100, 700, 500, false);
+        QVERIFY(board.isSelected(frame));
+
+        // A frame drawn inside another shows over it, whichever came first,
+        // and moves over it when it grows past it.
+        const int small = board.add("frame", 0, 0, 120, 120);
+        QCOMPARE(board.find(small)->text, QString("Frame 2"));
+        QCOMPARE(board.items().at(0).id, frame);
+        QCOMPARE(board.items().at(1).id, small);
+        QCOMPARE(board.itemAt(300, 200, 0), frame);
+        QCOMPARE(board.contents(frame).contains(small), true);
+        board.setGeometry(small, -100, -100, 800, 600);
+        QCOMPARE(board.items().at(0).id, small);
+        board.setGeometry(small, 0, 0, 120, 120);
+        QCOMPARE(board.items().at(0).id, frame);
+        // Sent to the front, a frame still stays behind the shapes, and
+        // nothing changed is nothing to undo.
+        board.selectOnly(frame);
+        const bool couldUndo = board.canUndo();
+        board.bringToFront();
+        QCOMPARE(board.items().at(0).id, frame);
+        QCOMPARE(board.canUndo(), couldUndo);
+
+        // Lined up with something else, it brings what it holds.
+        const int other = board.add("ellipse", 800, 400, 50, 50);
+        board.selectOnly(frame);
+        board.toggle(other);
+        board.alignSelection("bottom");
+        QCOMPARE(board.find(frame)->y, 150.0);
+        QCOMPARE(board.find(inside)->y, 200.0);
+        QCOMPARE(board.find(small)->y, 200.0);
+        board.undo();
+        QCOMPARE(board.find(inside)->y, 0.0);
+
+        // Copied, it comes with its contents, and only the copy of the frame
+        // is selected; deleted, they go with it, and undo brings all back.
+        const int before = board.count();
+        board.selectOnly(frame);
+        QVERIFY(board.duplicate(0, 0, false));
+        // The frame, the two shapes and the line in it, and the frame inside it.
+        QCOMPARE(board.count(), before + 5);
+        QCOMPARE(board.selectionCount(), 1);
+        QCOMPARE(board.selectedKind(), QString("frame"));
+        board.undo();
+        board.selectOnly(frame);
+        board.removeSelection();
+        QCOMPARE(board.count(), 1);
+        QCOMPARE(board.items().first().id, other);
+        board.undo();
+        QCOMPARE(board.count(), before);
+
+        // Kept with the board, behind everything; a turn in the file is left out.
+        QJsonObject saved = board.toJson();
+        QJsonArray items = saved.value("items").toArray();
+        for (int i = 0; i < items.size(); ++i) {
+            QJsonObject o = items[i].toObject();
+            if (o.value("id").toInt() == frame) {
+                o["rotation"] = 30;
+                items.removeAt(i);
+                items.append(o);
+                break;
+            }
+        }
+        saved["items"] = items;
+        Board again;
+        again.load(saved);
+        QCOMPARE(again.items().first().id, frame);
+        QCOMPARE(again.find(frame)->rotation, 0.0);
+        QCOMPARE(again.find(frame)->text, QString("Frame 1"));
+    }
+
     void shapesComeToTheFrontAndGoToTheBack() {
         Board board;
         const int under = board.add("rect", 0, 0, 100, 100);
@@ -1682,6 +1795,103 @@ private slots:
         // A Material popup animates out: `opened` drops at once, `visible` after.
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!help->property("visible").toBool());
+
+        QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
+        QCoreApplication::removeTranslator(&translator);
+    }
+
+    void windowDrawsFrames() {
+        QTemporaryDir dir;
+        Translator translator(dir.path() + "/language");
+        QCoreApplication::installTranslator(&translator);
+        Theme theme(dir.path());
+        Backend backend(dir.path() + "/boards");
+        Board *board = backend.board();
+        DotGrid::registerType();
+
+        QQmlApplicationEngine engine;
+        QStringList warnings;
+        connect(&engine, &QQmlEngine::warnings, this, [&](const QList<QQmlError> &errors) {
+            for (const auto &error : errors)
+                warnings << error.toString();
+        });
+        engine.rootContext()->setContextProperty("translator", &translator);
+        engine.rootContext()->setContextProperty("theme", &theme);
+        engine.rootContext()->setContextProperty("backend", &backend);
+        engine.rootContext()->setContextProperty("board", board);
+        engine.load(QUrl("qrc:/Main.qml"));
+        QVERIFY(!engine.rootObjects().isEmpty());
+        auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->requestActivate();
+        QVERIFY(QTest::qWaitForWindowActive(window));
+        auto *view = window->findChild<QQuickItem *>("view");
+        auto drag = [&](QPoint from, QPoint to) {
+            QTest::mousePress(window, Qt::LeftButton, {}, from);
+            for (int i = 1; i <= 5; ++i)
+                QTest::mouseMove(window, from + (to - from) * i / 5);
+            QTest::mouseRelease(window, Qt::LeftButton, {}, to);
+        };
+        const QPointF origin(view->property("camX").toDouble(), view->property("camY").toDouble());
+        auto world = [&](QPoint p) { return QPointF(p) - origin; };
+
+        // A rectangle, then F and a drag around it draws a frame that holds it.
+        QTest::keyClick(window, Qt::Key_R);
+        drag({200, 200}, {300, 260});
+        const int rect = board->items().last().id;
+        QTest::keyClick(window, Qt::Key_F);
+        QCOMPARE(view->property("tool").toString(), QString("frame"));
+        drag({150, 150}, {450, 350});
+        QCOMPARE(view->property("tool").toString(), QString("select"));
+        const BoardItem frame = board->items().first();
+        QCOMPARE(frame.kind, QString("frame"));
+        QCOMPARE(QRectF(frame.x, frame.y, frame.w, frame.h), QRectF(world({150, 150}), QSizeF(300, 200)));
+        QCOMPARE(board->contents(frame.id), QSet<int>({rect}));
+        auto *frameItem = visualChild(window->contentItem(), "frame-" + QString::number(frame.id));
+        QVERIFY(frameItem);
+        auto *frameName = visualChild(frameItem, "frameName");
+        QVERIFY(frameName);
+        QCOMPARE(frameName->property("text").toString(), QString("Frame 1"));
+
+        // A drag inside it, where it is empty, picks out what is in it.
+        board->clearSelection();
+        drag({160, 160}, {320, 280});
+        QCOMPARE(board->selectedId(), rect);
+        // A click there selects the frame.
+        QTest::mouseClick(window, Qt::LeftButton, {}, {400, 300});
+        QCOMPARE(board->selectedId(), frame.id);
+
+        // Dragged by its name, it takes the rectangle with it; one undo puts
+        // both back.
+        board->clearSelection();
+        drag({160, 140}, {260, 140});
+        QCOMPARE(board->selectedId(), frame.id);
+        QCOMPARE(board->find(frame.id)->x, frame.x + 100);
+        QCOMPARE(board->find(rect)->x, world({200, 200}).x() + 100);
+        QTest::keySequence(window, QKeySequence::Undo);
+        QCOMPARE(board->find(rect)->x, world({200, 200}).x());
+
+        // Double-clicking the name renames the frame.
+        QTest::mouseDClick(window, Qt::LeftButton, {}, {170, 140});
+        QTRY_VERIFY(view->property("editing").toBool());
+        QTest::keySequence(window, QKeySequence::SelectAll);
+        for (const char *c = "Ideas"; *c; ++c)
+            QTest::keyClick(window, *c);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(board->find(frame.id)->text, QString("Ideas"));
+        QVERIFY(!view->property("editing").toBool());
+        // A double click inside writes, as on the canvas.
+        QTest::mouseDClick(window, Qt::LeftButton, {}, {400, 320});
+        QTRY_VERIFY(view->property("editing").toBool());
+        QCOMPARE(view->property("editingKind").toString(), QString("text"));
+        QTest::keyClick(window, Qt::Key_Escape);
+
+        // Shift+F still fits everything in the window.
+        view->setProperty("zoom", 3.0);
+        QTest::keyClick(window, Qt::Key_F, Qt::ShiftModifier);
+        QVERIFY(view->property("zoom").toDouble() < 3.0);
+        QCOMPARE(view->property("tool").toString(), QString("select"));
 
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
         QCoreApplication::removeTranslator(&translator);

@@ -15,7 +15,7 @@
 // ends are worked out from where they are now.
 struct BoardItem {
     int id = 0;
-    QString kind; // rect, ellipse, triangle, postit, icon, text, line, connector
+    QString kind; // rect, ellipse, triangle, postit, icon, frame, text, line, connector
     double x = 0, y = 0, w = 0, h = 0;
     QString text;
     QString color; // a theme palette key, or empty for the foreground
@@ -27,6 +27,7 @@ struct BoardItem {
     bool isConnector() const { return kind == QLatin1String("connector"); }
     bool isLine() const { return kind == QLatin1String("line"); }
     bool isShape() const { return !isConnector() && !isLine(); }
+    bool isFrame() const { return kind == QLatin1String("frame"); }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
             && color == o.color && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
@@ -110,6 +111,10 @@ public:
     Q_INVOKABLE int linkToNew(int from, double x, double y);
     Q_INVOKABLE void setGeometry(int id, double x, double y, double w, double h);
     Q_INVOKABLE void moveSelection(double dx, double dy);
+    // A drag of the selection takes along what is in its frames as it
+    // starts, so the frames pick nothing more up on the way.
+    Q_INVOKABLE void beginMove();
+    Q_INVOKABLE void endMove();
     Q_INVOKABLE void setText(int id, const QString &text);
     Q_INVOKABLE void setFontSize(int id, int size);
     Q_INVOKABLE void setRotation(int id, double degrees);
@@ -135,6 +140,10 @@ public:
 
     Q_INVOKABLE int itemAt(double x, double y, double tolerance) const;
     Q_INVOKABLE int shapeAt(double x, double y, double margin) const;
+    // The frame whose name, `height` tall above its top, is under a point.
+    Q_INVOKABLE int frameLabelAt(double x, double y, double height) const;
+    // What is in a frame: everything that lies wholly inside it.
+    QSet<int> contents(int frameId) const;
     Q_INVOKABLE QVariantMap item(int id) const;
     Q_INVOKABLE QRectF boundsOf(int id) const;
     Q_INVOKABLE QRectF movableBounds() const;
@@ -185,12 +194,16 @@ private:
     void geometryChanged(const QSet<int> &ids);
     void applyMeasuredSize(int id, double w, double h);
     void reorderSelection(bool toFront);
+    void settleFrames();
+    QSet<int> withContents(const QSet<int> &ids) const;
     void restore(const Snapshot &snapshot);
     QJsonArray selectionJson() const;
     bool insertJson(const QJsonArray &array, const QPointF &center, bool atCenter);
 
     QVector<BoardItem> m_items;
     QVector<BoardItem> m_scaleItems;
+    QSet<int> m_carried;
+    bool m_moving = false;
     QRectF m_scaleFrom;
     QHash<int, int> m_rows;
     QSet<int> m_selected;

@@ -2,6 +2,7 @@
 
 #include <QGuiApplication>
 #include <QPageSize>
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPdfWriter>
@@ -102,8 +103,13 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
         paintLabel(painter, item, readable(paper));
     } else {
         // The outline is drawn inside the shape's box, as the window draws it.
-        painter.setPen(QPen(ink, 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter.setBrush(tinted(look.background, ink, item.color.isEmpty() ? 0.06 : 0.28));
+        // A frame is a paler rectangle with a fainter, finer outline.
+        const bool frame = item.isFrame(), plain = item.color.isEmpty();
+        QColor outline = ink;
+        if (frame)
+            outline.setAlphaF(plain ? 0.3 : 0.8);
+        painter.setPen(QPen(outline, frame ? 1.5 : 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(tinted(look.background, ink, frame ? (plain ? 0.035 : 0.16) : plain ? 0.06 : 0.28));
         const QRectF inner = box.adjusted(1, 1, -1, -1);
         if (item.kind == QLatin1String("ellipse")) {
             painter.drawEllipse(inner);
@@ -113,7 +119,18 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
             const double corner = std::max(0.0, std::min({double(look.radius), item.w / 2, item.h / 2}) - 1);
             painter.drawRoundedRect(inner, corner, corner);
         }
-        paintLabel(painter, item, look.foreground);
+        // A frame's name is above it, not in it.
+        if (item.isFrame()) {
+            if (!item.text.isEmpty()) {
+                painter.setFont(fontOf(14));
+                painter.setPen(look.foreground);
+                const QFontMetricsF metrics(painter.font());
+                painter.drawText(QPointF(item.x, item.y - 6 - metrics.descent()),
+                                 metrics.elidedText(item.text, Qt::ElideRight, std::max(0.0, item.w)));
+            }
+        } else {
+            paintLabel(painter, item, look.foreground);
+        }
     }
     painter.restore();
 }
@@ -133,12 +150,16 @@ QRectF exportArea(const Board &board) {
 void paintBoard(QPainter &painter, const Board &board, const BoardLook &look) {
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
-    // Connectors lie beneath everything else; the rest is drawn in its order.
+    // Frames lie beneath everything else, then the connectors; the rest is
+    // drawn in its order.
+    for (const BoardItem &item : board.items())
+        if (item.isFrame())
+            paintShape(painter, item, look);
     for (const BoardItem &item : board.items())
         if (item.isConnector())
             paintStroke(painter, board.line(item), look.foreground, true);
     for (const BoardItem &item : board.items()) {
-        if (item.isConnector())
+        if (item.isConnector() || item.isFrame())
             continue;
         if (item.isLine())
             paintStroke(painter, board.line(item),

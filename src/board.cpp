@@ -18,7 +18,7 @@ const double edgeGap = 5;
 const int undoLimit = 200;
 
 const QStringList &kinds() {
-    static const QStringList kinds{"rect", "ellipse", "triangle", "postit", "icon", "text", "line", "connector"};
+    static const QStringList kinds{"rect", "ellipse", "triangle", "postit", "icon", "frame", "text", "line", "connector"};
     return kinds;
 }
 
@@ -91,9 +91,40 @@ BoardItem itemFromJson(const QJsonObject &o) {
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
-    if (item.isShape())
+    // A frame stays upright, so what is in it is simply what is within its box.
+    if (item.isShape() && !item.isFrame())
         item.rotation = normalized(o.value("rotation").toDouble());
     return item;
+}
+
+double area(const BoardItem &item) {
+    return std::abs(item.w * item.h);
+}
+
+// Frames lie beneath everything else, a larger one behind a smaller, so a
+// frame drawn inside another shows over it, and what is in them over both.
+// Otherwise everything keeps its order.
+QVector<int> paintOrder(const QVector<BoardItem> &items) {
+    QVector<const BoardItem *> frames, rest;
+    for (const BoardItem &item : items)
+        (item.isFrame() ? frames : rest).append(&item);
+    std::stable_sort(frames.begin(), frames.end(),
+                     [](const BoardItem *a, const BoardItem *b) { return area(*a) > area(*b); });
+    QVector<int> order;
+    for (const BoardItem *item : std::as_const(frames))
+        order.append(item->id);
+    for (const BoardItem *item : std::as_const(rest))
+        order.append(item->id);
+    return order;
+}
+
+void sortFrames(QVector<BoardItem> &items) {
+    const QVector<int> order = paintOrder(items);
+    QHash<int, BoardItem> byId;
+    for (const BoardItem &item : std::as_const(items))
+        byId.insert(item.id, item);
+    for (int i = 0; i < order.size(); ++i)
+        items[i] = byId.value(order[i]);
 }
 
 double cross(const QPointF &a, const QPointF &b) {
@@ -350,9 +381,59 @@ int Board::add(const QString &kind, double x, double y, double w, double h) {
     item.color = colorFor(kind, m_color);
     if (kind == QLatin1String("icon"))
         item.icon = QStringLiteral("star");
+    if (kind == QLatin1String("frame")) {
+        int frames = 0;
+        for (const BoardItem &other : std::as_const(m_items))
+            frames += other.isFrame();
+        item.text = tr("Frame %1").arg(frames + 1);
+    }
     const int id = insert(item);
+    settleFrames();
     setSelection({id});
     return id;
+}
+
+void Board::settleFrames() {
+    const QVector<int> order = paintOrder(m_items);
+    // Everything before `i` is in place, so what belongs there is at `i` or
+    // after it, and moves up.
+    for (int i = 0; i < order.size(); ++i) {
+        const int from = row(order[i]);
+        if (from == i)
+            continue;
+        beginMoveRows({}, from, from, {}, i);
+        m_items.move(from, i);
+        reindex();
+        endMoveRows();
+    }
+}
+
+QSet<int> Board::contents(int frameId) const {
+    QSet<int> inside;
+    const BoardItem *frame = find(frameId);
+    if (!frame || !frame->isFrame())
+        return inside;
+    const QRectF box = QRectF(frame->x, frame->y, frame->w, frame->h).normalized();
+    for (const BoardItem &item : m_items) {
+        if (item.id == frameId || item.isConnector())
+            continue;
+        // A frame of the same size is beside it, not in it.
+        if (item.isFrame() && area(item) >= area(*frame))
+            continue;
+        // Compared by hand, since a level line has an empty rectangle.
+        const QRectF b = bounds(item);
+        if (b.left() >= box.left() && b.right() <= box.right() && b.top() >= box.top() && b.bottom() <= box.bottom())
+            inside.insert(item.id);
+    }
+    return inside;
+}
+
+// Some things, and everything in those of them that are frames.
+QSet<int> Board::withContents(const QSet<int> &ids) const {
+    QSet<int> all = ids;
+    for (int id : ids)
+        all.unite(contents(id));
+    return all;
 }
 
 QStringList Board::iconNames() const {
@@ -374,7 +455,8 @@ int Board::addIcon(const QString &name, double x, double y, double w, double h) 
 
 int Board::link(int from, int to) {
     const BoardItem *a = find(from), *b = find(to);
-    if (!a || !b || from == to || !a->isShape() || !b->isShape())
+    // A frame holds things rather than takes part in them.
+    if (!a || !b || from == to || !a->isShape() || !b->isShape() || a->isFrame() || b->isFrame())
         return 0;
     for (const BoardItem &item : m_items)
         if (item.isConnector() && ((item.from == from && item.to == to) || (item.from == to && item.to == from)))
@@ -391,7 +473,7 @@ int Board::link(int from, int to) {
 // shape it came from lands there, already connected.
 int Board::linkToNew(int from, double x, double y) {
     const BoardItem *source = find(from);
-    if (!source || !source->isShape())
+    if (!source || !source->isShape() || source->isFrame())
         return 0;
     checkpoint();
     BoardItem item = *source;
@@ -431,16 +513,31 @@ void Board::setGeometry(int id, double x, double y, double w, double h) {
     item.y = y;
     item.w = w;
     item.h = h;
+    const bool frame = item.isFrame();
     geometryChanged({id});
+    if (frame)
+        settleFrames();
     emit changed();
 }
 
+void Board::beginMove() {
+    m_carried = withContents(m_selected) - m_selected;
+    m_moving = true;
+}
+
+void Board::endMove() {
+    m_carried.clear();
+    m_moving = false;
+}
+
+// What is in a selected frame goes with it.
 void Board::moveSelection(double dx, double dy) {
     if (dx == 0 && dy == 0)
         return;
+    const QSet<int> moving = m_moving ? m_selected + m_carried : withContents(m_selected);
     QSet<int> moved;
     for (BoardItem &item : m_items) {
-        if (!m_selected.contains(item.id) || item.isConnector())
+        if (!moving.contains(item.id) || item.isConnector())
             continue;
         item.x += dx;
         item.y += dy;
@@ -474,7 +571,7 @@ void Board::setFontSize(int id, int size) {
 void Board::setRotation(int id, double degrees) {
     const int r = row(id);
     degrees = normalized(degrees);
-    if (r < 0 || !m_items[r].isShape() || m_items[r].rotation == degrees)
+    if (r < 0 || !m_items[r].isShape() || m_items[r].isFrame() || m_items[r].rotation == degrees)
         return;
     m_items[r].rotation = degrees;
     geometryChanged({id});
@@ -485,7 +582,7 @@ void Board::setRotation(int id, double degrees) {
 void Board::rotateSelection(double degrees) {
     QSet<int> turnedIds;
     for (const BoardItem &item : m_items)
-        if (m_selected.contains(item.id) && item.isShape())
+        if (m_selected.contains(item.id) && item.isShape() && !item.isFrame())
             turnedIds.insert(item.id);
     if (turnedIds.isEmpty() || degrees == 0)
         return;
@@ -527,19 +624,35 @@ void Board::alignSelection(const QString &edge) {
         if (edge == QLatin1String("middle")) return QPointF(0, all.center().y() - b.center().y());
         return QPointF();
     };
-    QSet<int> moved;
+    // Each selected thing moves its own way, and what is in a selected frame
+    // moves with it: with the smallest, when frames are inside each other.
+    QHash<int, QPointF> by;
     for (const BoardItem &item : m_items)
-        if (m_selected.contains(item.id) && !item.isConnector() && !shift(item).isNull())
-            moved.insert(item.id);
+        if (m_selected.contains(item.id) && !item.isConnector())
+            by.insert(item.id, shift(item));
+    QHash<int, double> holder;
+    for (const BoardItem &frame : m_items) {
+        if (!m_selected.contains(frame.id) || !frame.isFrame())
+            continue;
+        for (int id : contents(frame.id)) {
+            if (m_selected.contains(id) || (holder.contains(id) && holder.value(id) <= area(frame)))
+                continue;
+            holder.insert(id, area(frame));
+            by.insert(id, by.value(frame.id));
+        }
+    }
+    QSet<int> moved;
+    for (auto it = by.cbegin(); it != by.cend(); ++it)
+        if (!it.value().isNull())
+            moved.insert(it.key());
     if (moved.isEmpty())
         return;
     checkpoint();
     for (BoardItem &item : m_items) {
         if (!moved.contains(item.id))
             continue;
-        const QPointF by = shift(item);
-        item.x += by.x();
-        item.y += by.y();
+        item.x += by.value(item.id).x();
+        item.y += by.value(item.id).y();
     }
     geometryChanged(moved);
     emit changed();
@@ -552,7 +665,9 @@ void Board::reorderSelection(bool toFront) {
     QVector<BoardItem> picked, rest;
     for (const BoardItem &item : m_items)
         (m_selected.contains(item.id) && !item.isConnector() ? picked : rest).append(item);
-    const QVector<BoardItem> next = toFront ? rest + picked : picked + rest;
+    QVector<BoardItem> next = toFront ? rest + picked : picked + rest;
+    // Frames stay behind, however they are sent.
+    sortFrames(next);
     if (picked.isEmpty() || next == m_items)
         return;
     checkpoint();
@@ -630,6 +745,7 @@ void Board::scaleSelectionTo(double x, double y, double w, double h) {
         scaled.insert(item.id);
     }
     geometryChanged(scaled);
+    settleFrames();
     emit changed();
 }
 
@@ -700,7 +816,8 @@ void Board::removeSelection() {
     if (m_selected.isEmpty())
         return;
     checkpoint();
-    removeIds(m_selected);
+    // What is in a frame goes with it.
+    removeIds(withContents(m_selected));
 }
 
 void Board::removeItem(int id) {
@@ -748,6 +865,13 @@ void Board::selectInRect(double x, double y, double w, double h, bool additive) 
     QSet<int> selection = additive ? m_selected : QSet<int>{};
     for (const BoardItem &item : m_items) {
         const QRectF b = bounds(item);
+        // A frame is picked only when the band takes it all in, so a band
+        // drawn inside one picks out what is in it.
+        if (item.isFrame()) {
+            if (area.contains(b))
+                selection.insert(item.id);
+            continue;
+        }
         // Compared by hand, since a level line has an empty rectangle.
         if (b.left() <= area.right() && b.right() >= area.left() && b.top() <= area.bottom()
             && b.bottom() >= area.top())
@@ -757,13 +881,13 @@ void Board::selectInRect(double x, double y, double w, double h, bool additive) 
 }
 
 // The topmost thing under a point. Connectors are drawn beneath the shapes,
-// so they are only hit where nothing else is.
+// and frames beneath them, so each is only hit where nothing above it is.
 int Board::itemAt(double x, double y, double tolerance) const {
     const QPointF point(x, y);
-    for (int pass = 0; pass < 2; ++pass) {
+    for (int pass = 0; pass < 3; ++pass) {
         for (int i = m_items.size() - 1; i >= 0; --i) {
             const BoardItem &item = m_items[i];
-            if (item.isConnector() != (pass == 1))
+            if ((item.isFrame() ? 2 : item.isConnector() ? 1 : 0) != pass)
                 continue;
             bool hit = false;
             const QPointF p = toLocal(item, point);
@@ -792,11 +916,24 @@ int Board::itemAt(double x, double y, double tolerance) const {
 // failing that the topmost one whose box is within `margin` of it.
 int Board::shapeAt(double x, double y, double margin) const {
     const BoardItem *exact = find(itemAt(x, y, 0));
-    if (exact && exact->isShape())
+    if (exact && exact->isShape() && !exact->isFrame())
         return exact->id;
     for (int i = m_items.size() - 1; i >= 0; --i) {
         const BoardItem &item = m_items[i];
-        if (item.isShape() && bounds(item).adjusted(-margin, -margin, margin, margin).contains(QPointF(x, y)))
+        if (item.isShape() && !item.isFrame() && bounds(item).adjusted(-margin, -margin, margin, margin).contains(QPointF(x, y)))
+            return item.id;
+    }
+    return 0;
+}
+
+// A frame's name sits above its top left corner, as wide as the frame.
+int Board::frameLabelAt(double x, double y, double height) const {
+    for (int i = m_items.size() - 1; i >= 0; --i) {
+        const BoardItem &item = m_items[i];
+        if (!item.isFrame())
+            continue;
+        const QRectF box = QRectF(item.x, item.y, item.w, item.h).normalized();
+        if (QRectF(box.left(), box.top() - height, box.width(), height).contains(QPointF(x, y)))
             return item.id;
     }
     return 0;
@@ -834,7 +971,8 @@ QVariantMap Board::snapOffset(double x, double y, double w, double h, double thr
     };
     QVector<Other> others;
     for (const BoardItem &item : m_items) {
-        if (m_selected.contains(item.id) || item.isConnector())
+        // What a frame takes along moves with it, and isn't something to line up with.
+        if (m_selected.contains(item.id) || m_carried.contains(item.id) || item.isConnector())
             continue;
         const QRectF b = bounds(item);
         others.append({{b.left(), b.center().x(), b.right()}, {b.top(), b.center().y(), b.bottom()}, b});
@@ -1098,14 +1236,22 @@ void Board::redo() {
     restore(m_redo.takeLast());
 }
 
-// The selected items, and the connectors that run between two of them.
+// The selected items, what is in the frames among them, and the connectors
+// that run between two of all those. What only came along with a frame is
+// marked, so a copy selects the frame and not everything in it.
 QJsonArray Board::selectionJson() const {
+    const QSet<int> all = withContents(m_selected);
     QJsonArray array;
+    for (const BoardItem &item : m_items) {
+        if (item.isConnector() || !all.contains(item.id))
+            continue;
+        QJsonObject o = itemToJson(item);
+        if (!m_selected.contains(item.id))
+            o["carried"] = true;
+        array.append(o);
+    }
     for (const BoardItem &item : m_items)
-        if (!item.isConnector() && m_selected.contains(item.id))
-            array.append(itemToJson(item));
-    for (const BoardItem &item : m_items)
-        if (item.isConnector() && m_selected.contains(item.from) && m_selected.contains(item.to))
+        if (item.isConnector() && all.contains(item.from) && all.contains(item.to))
             array.append(itemToJson(item));
     return array;
 }
@@ -1113,11 +1259,14 @@ QJsonArray Board::selectionJson() const {
 bool Board::insertJson(const QJsonArray &array, const QPointF &center, bool atCenter) {
     // Connectors go in after everything they join.
     QVector<BoardItem> incoming, connectors;
+    QSet<int> carried;
     QRectF all;
     for (const auto &value : array) {
         const BoardItem item = itemFromJson(value.toObject());
         if (!kinds().contains(item.kind))
             continue;
+        if (value.toObject().value("carried").toBool())
+            carried.insert(item.id);
         if (item.isConnector()) {
             connectors.append(item);
             continue;
@@ -1150,9 +1299,11 @@ bool Board::insertJson(const QJsonArray &array, const QPointF &center, bool atCe
             item.y += offset.y();
             const int id = insert(item);
             renamed.insert(old, id);
-            selection.insert(id);
+            if (!carried.contains(old))
+                selection.insert(id);
         }
     }
+    settleFrames();
     setSelection(selection);
     return true;
 }
@@ -1219,6 +1370,7 @@ void Board::load(const QJsonObject &object) {
         return item.isConnector() && (!seen.contains(item.from) || !seen.contains(item.to));
     });
     m_nextId = std::max(object.value("nextId").toInt(1), highest + 1);
+    sortFrames(m_items);
     reindex();
 
     const QJsonObject view = object.value("view").toObject();
