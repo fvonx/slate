@@ -15,7 +15,7 @@
 // ends are worked out from where they are now.
 struct BoardItem {
     int id = 0;
-    QString kind; // rect, ellipse, triangle, rhombus, postit, icon, frame, text, line, connector
+    QString kind; // rect, ellipse, triangle, rhombus, arrow, postit, icon, frame, text, line, connector
     double x = 0, y = 0, w = 0, h = 0;
     QString text;
     QString color; // a theme palette key, or empty for the foreground
@@ -37,7 +37,7 @@ struct BoardItem {
     // the line, and the connector.
     bool takesStroke() const {
         return kind == QLatin1String("rect") || kind == QLatin1String("ellipse") || kind == QLatin1String("triangle")
-            || kind == QLatin1String("rhombus") || isFrame() || isLine() || isConnector();
+            || kind == QLatin1String("rhombus") || kind == QLatin1String("arrow") || isFrame() || isLine() || isConnector();
     }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text

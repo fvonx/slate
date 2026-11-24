@@ -19,7 +19,7 @@ const double edgeGap = 5;
 const int undoLimit = 200;
 
 const QStringList &kinds() {
-    static const QStringList kinds{"rect", "ellipse", "triangle", "rhombus", "postit", "icon", "frame", "text", "line", "connector"};
+    static const QStringList kinds{"rect", "ellipse", "triangle", "rhombus", "arrow", "postit", "icon", "frame", "text", "line", "connector"};
     return kinds;
 }
 
@@ -168,6 +168,25 @@ QVector<QPointF> rhombus(const BoardItem &item) {
             {item.x + item.w / 2, item.y + item.h}, {item.x, item.y + item.h / 2}};
 }
 
+// A block arrow points right until it is turned: a shaft half as thick as
+// the box is tall, and a head across the whole of it, as long as half the
+// box's shorter side.
+QVector<QPointF> arrow(const BoardItem &item) {
+    const double head = std::min(item.w, item.h) / 2, neck = item.x + item.w - head;
+    return {{item.x, item.y + item.h / 4}, {neck, item.y + item.h / 4}, {neck, item.y},
+            {item.x + item.w, item.y + item.h / 2}, {neck, item.y + item.h},
+            {neck, item.y + item.h * 3 / 4}, {item.x, item.y + item.h * 3 / 4}};
+}
+
+// The corners of a shape whose outline is straight lines, or none.
+QVector<QPointF> corners(const BoardItem &item) {
+    if (item.kind == QLatin1String("triangle"))
+        return triangle(item);
+    if (item.kind == QLatin1String("arrow"))
+        return arrow(item);
+    return {};
+}
+
 // Where connectors aim: the middle, which for a triangle is its centroid.
 QPointF anchor(const BoardItem &item) {
     if (item.kind == QLatin1String("triangle"))
@@ -212,11 +231,10 @@ QPointF edge(const BoardItem &item, const QPointF &worldToward) {
     double t = 1;
     if (item.kind == QLatin1String("ellipse")) {
         t = 1 / std::sqrt(d.x() * d.x() / (hw * hw) + d.y() * d.y() / (hh * hh));
-    } else if (item.kind == QLatin1String("triangle")) {
-        const auto v = triangle(item);
+    } else if (const auto v = corners(item); !v.isEmpty()) {
         double best = -1;
-        for (int i = 0; i < 3; ++i) {
-            const QPointF a = v[i], e = v[(i + 1) % 3] - a;
+        for (int i = 0; i < v.size(); ++i) {
+            const QPointF a = v[i], e = v[(i + 1) % v.size()] - a;
             const double denominator = cross(d, e);
             if (std::abs(denominator) < 1e-9)
                 continue;
@@ -1158,6 +1176,11 @@ int Board::itemAt(double x, double y, double tolerance) const {
                 const double a = cross(v[1] - v[0], p - v[0]), b = cross(v[2] - v[1], p - v[1]),
                              c = cross(v[0] - v[2], p - v[2]);
                 hit = (a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0);
+            } else if (item.kind == QLatin1String("arrow")) {
+                const auto v = arrow(item);
+                hit = QPolygonF(v).containsPoint(p, Qt::OddEvenFill);
+                for (int k = 0; k < v.size() && !hit && tolerance > 0; ++k)
+                    hit = distanceToSegment(p, {v[k], v[(k + 1) % v.size()]}) <= tolerance;
             } else if (item.kind == QLatin1String("rhombus")) {
                 const double hw = item.w / 2 + tolerance, hh = item.h / 2 + tolerance;
                 const QPointF d = p - anchor(item);
@@ -1377,7 +1400,9 @@ QVariantList Board::otherRotations() const {
 // within reach of the outline. A drag from there resizes the shape that way.
 // A circle's outline is split where its diagonals cross it; a triangle has a
 // bottom and two slanted sides, and no top. A rhombus has only slanted
-// sides, each split in the middle between the two corners it joins.
+// sides, each split in the middle between the two corners it joins. An
+// arrow is sized along by its tail and its point, and across by the sides
+// of its shaft and the back of its head.
 QString Board::outlineSide(int id, double x, double y, double reach) const {
     const BoardItem *item = find(id);
     if (!item || !item->isShape() || item->kind == QLatin1String("text"))
@@ -1414,6 +1439,20 @@ QString Board::outlineSide(int id, double x, double y, double reach) const {
             return {};
         const double dx = (p.x() - left) / item->w - 0.5, dy = (p.y() - top) / item->h - 0.5;
         return std::abs(dx) >= std::abs(dy) ? (dx < 0 ? "l" : "r") : (dy < 0 ? "t" : "b");
+    }
+    if (item->kind == QLatin1String("arrow")) {
+        const auto v = arrow(*item);
+        static const char *const sides[] = {"t", "t", "r", "r", "b", "b", "l"};
+        double nearest = reach;
+        QString side;
+        for (int i = 0; i < v.size(); ++i) {
+            const double distance = distanceToSegment(p, {v[i], v[(i + 1) % v.size()]});
+            if (distance <= nearest) {
+                nearest = distance;
+                side = sides[i];
+            }
+        }
+        return side;
     }
     const bool alongX = p.x() >= left - reach && p.x() <= right + reach;
     const bool alongY = p.y() >= top - reach && p.y() <= bottom + reach;

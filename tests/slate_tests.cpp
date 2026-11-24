@@ -223,6 +223,44 @@ private slots:
         board.removeItem(rhombus);
         board.setSelectionStroke("");
 
+        // A block arrow points right: a shaft through the middle half of
+        // its box and a head across all of it, here 30 long.
+        const int arrow = board.add("arrow", 800, 0, 100, 60);
+        QCOMPARE(board.itemAt(820, 30, 0), arrow);
+        QCOMPARE(board.itemAt(872, 5, 0), arrow);
+        QCOMPARE(board.itemAt(897, 30, 0), arrow);
+        // Above and below the shaft, and beside the point, is not the arrow.
+        for (const QPointF &outside : {QPointF(820, 8), QPointF(820, 52), QPointF(896, 5), QPointF(896, 55)})
+            QCOMPARE(board.itemAt(outside.x(), outside.y(), 0), 0);
+        // A connector from above meets the shaft, not the top of the box,
+        // and one from the right meets the point.
+        const QPointF onShaft = board.edgePoint(arrow, 850, -500);
+        QVERIFY(std::abs(onShaft.x() - 850) < 1 && onShaft.y() < 15 && onShaft.y() > 5);
+        const QPointF onPoint = board.edgePoint(arrow, 1500, 30);
+        QVERIFY(onPoint.x() > 900 && onPoint.x() < 910 && std::abs(onPoint.y() - 30) < 1);
+        // Its tail and point size its length, its shaft and the back of
+        // its head its thickness.
+        QCOMPARE(board.outlineSide(arrow, 801, 30, 4), QString("l"));
+        QCOMPARE(board.outlineSide(arrow, 885, 16, 4), QString("r"));
+        QCOMPARE(board.outlineSide(arrow, 830, 16, 4), QString("t"));
+        QCOMPARE(board.outlineSide(arrow, 830, 44, 4), QString("b"));
+        QCOMPARE(board.outlineSide(arrow, 871, 52, 4), QString("b"));
+        QCOMPARE(board.outlineSide(arrow, 835, 30, 4), QString());
+        QCOMPARE(board.outlineSide(arrow, 830, 3, 4), QString());
+        // Turned a quarter, it points down.
+        board.setRotation(arrow, 90);
+        QCOMPARE(board.itemAt(850, 75, 0), arrow);
+        QCOMPARE(board.itemAt(820, 30, 0), 0);
+        board.setRotation(arrow, 0);
+        board.selectOnly(arrow);
+        board.setSelectionStroke("dotted");
+        Board pointed;
+        pointed.load(board.toJson());
+        QCOMPARE(pointed.find(arrow)->kind, QString("arrow"));
+        QCOMPARE(pointed.find(arrow)->stroke, QString("dotted"));
+        board.removeItem(arrow);
+        board.setSelectionStroke("");
+
         const int line = board.add("line", 0, 200, 100, 0);
         QCOMPARE(board.itemAt(50, 203, 2), line);
         QCOMPARE(board.itemAt(50, 230, 2), 0);
@@ -1162,6 +1200,7 @@ private slots:
         board->add("ellipse", 0, 300, 120, 120);
         board->add("triangle", 300, 300, 120, 110);
         board->setText(board->add("rhombus", 500, 450, 160, 100), "Decide");
+        board->setText(board->add("arrow", 700, 450, 160, 80), "Next");
         board->add("line", 0, 500, 200, 40);
         const int words = board->add("text", 300, 500, 90, 30);
         board->setText(words, "Loose words");
@@ -2071,6 +2110,11 @@ private slots:
         QTest::keyClick(window, Qt::Key_D);
         QCOMPARE(view->property("tool").toString(), QString("rhombus"));
         QCOMPARE(window->property("lastShape").toString(), QString("rhombus"));
+        // And so is the arrow, on W.
+        QVERIFY(visualChild(shapeMenu->property("contentItem").value<QQuickItem *>(), "shape-arrow"));
+        QTest::keyClick(window, Qt::Key_W);
+        QCOMPARE(view->property("tool").toString(), QString("arrow"));
+        QCOMPARE(window->property("lastShape").toString(), QString("arrow"));
         QTest::keyClick(window, Qt::Key_O);
         QCOMPARE(window->property("lastShape").toString(), QString("ellipse"));
         QTest::keyClick(window, Qt::Key_Escape);

@@ -73,8 +73,9 @@ void paintLabel(QPainter &painter, const BoardItem &item, const QColor &color) {
     // Centered in the shape and wrapped to its width; in a triangle, in the
     // wide part below the middle.
     const bool triangle = item.kind == QLatin1String("triangle");
-    // A rhombus is half as wide halfway to its top as it is in the middle.
-    const bool narrow = triangle || item.kind == QLatin1String("rhombus");
+    // A rhombus is half as wide halfway to its top as it is in the middle,
+    // and an arrow's words keep clear of its point.
+    const bool narrow = triangle || item.kind == QLatin1String("rhombus") || item.kind == QLatin1String("arrow");
     const double width = std::max(0.0, narrow ? item.w / 2 : item.w - 16);
     const QPointF middle(item.x + item.w / 2, item.y + item.h / 2 + (triangle ? item.h / 6 : 0));
     painter.setFont(fontOf(18));
@@ -133,6 +134,12 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
         } else if (item.kind == QLatin1String("rhombus")) {
             painter.drawPolygon(QPolygonF{{box.center().x(), inner.top()}, {inner.right(), box.center().y()},
                                           {box.center().x(), inner.bottom()}, {inner.left(), box.center().y()}});
+        } else if (item.kind == QLatin1String("arrow")) {
+            const double neck = inner.right() - std::min(item.w, item.h) / 2;
+            const double upper = item.y + item.h / 4, lower = item.y + item.h * 3 / 4;
+            painter.drawPolygon(QPolygonF{{inner.left(), upper}, {neck, upper}, {neck, inner.top()},
+                                          {inner.right(), box.center().y()}, {neck, inner.bottom()},
+                                          {neck, lower}, {inner.left(), lower}});
         } else {
             const double corner = std::max(0.0, std::min({double(look.radius), item.w / 2, item.h / 2}) - 1);
             painter.drawRoundedRect(inner, corner, corner);
