@@ -9,6 +9,7 @@
 #include <QMimeData>
 #include <QPolygonF>
 #include <cmath>
+#include <numeric>
 
 namespace {
 
@@ -57,6 +58,8 @@ QJsonObject itemToJson(const BoardItem &item) {
         o["icon"] = item.icon;
     if (item.rotation != 0)
         o["rotation"] = item.rotation;
+    if (item.group != 0)
+        o["group"] = item.group;
     return o;
 }
 
@@ -102,6 +105,9 @@ BoardItem itemFromJson(const QJsonObject &o) {
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
+    // A connector follows its shapes, so it is in no group of its own.
+    if (!item.isConnector())
+        item.group = std::max(0, o.value("group").toInt());
     // A frame stays upright, so what is in it is simply what is within its box.
     if (item.isShape() && !item.isFrame())
         item.rotation = normalized(o.value("rotation").toDouble());
@@ -235,6 +241,80 @@ Board::Board(QObject *parent) : QAbstractListModel(parent) {
                      });
     QObject::connect(this, &Board::selectionChanged, this, &Board::shownStrokeChanged);
     QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::shownStrokeChanged);
+    QObject::connect(this, &Board::selectionChanged, this, &Board::groupingChanged);
+    QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::groupingChanged);
+}
+
+QSet<int> Board::withGroups(const QSet<int> &ids) const {
+    QSet<int> groups;
+    for (const BoardItem &item : m_items)
+        if (item.group != 0 && ids.contains(item.id))
+            groups.insert(item.group);
+    if (groups.isEmpty())
+        return ids;
+    QSet<int> all = ids;
+    for (const BoardItem &item : m_items)
+        if (groups.contains(item.group))
+            all.insert(item.id);
+    return all;
+}
+
+void Board::pruneGroups() {
+    QHash<int, int> members;
+    for (const BoardItem &item : std::as_const(m_items))
+        if (item.group != 0)
+            ++members[item.group];
+    for (BoardItem &item : m_items)
+        if (item.group != 0 && members.value(item.group) < 2)
+            item.group = 0;
+}
+
+int Board::arrangeCount() const {
+    QSet<int> groups;
+    int n = 0;
+    for (const BoardItem &item : m_items) {
+        if (!m_selected.contains(item.id) || item.isConnector())
+            continue;
+        if (item.group == 0)
+            ++n;
+        else
+            groups.insert(item.group);
+    }
+    return n + groups.size();
+}
+
+bool Board::canGroup() const {
+    return groupCount() >= 2 && (arrangeCount() >= 2 || !canUngroup());
+}
+
+bool Board::canUngroup() const {
+    for (const BoardItem &item : m_items)
+        if (item.group != 0 && m_selected.contains(item.id))
+            return true;
+    return false;
+}
+
+void Board::groupSelection() {
+    if (!canGroup())
+        return;
+    checkpoint();
+    const int group = m_nextId++;
+    for (BoardItem &item : m_items)
+        if (m_selected.contains(item.id) && !item.isConnector())
+            item.group = group;
+    emit groupingChanged();
+    emit changed();
+}
+
+void Board::ungroupSelection() {
+    if (!canUngroup())
+        return;
+    checkpoint();
+    for (BoardItem &item : m_items)
+        if (m_selected.contains(item.id))
+            item.group = 0;
+    emit groupingChanged();
+    emit changed();
 }
 
 QString Board::shownStroke() const {
@@ -632,60 +712,75 @@ void Board::rotateSelection(double degrees) {
 // turned shape is lined up by the upright box it fits in, which is the edge
 // the eye sees. Connectors follow their shapes, so they aren't moved.
 void Board::alignSelection(const QString &edge) {
+    // What is lined up: each selected thing by itself, and a group as the
+    // one box around everything in it.
+    QHash<int, int> unitOf;
+    QVector<QRectF> units;
+    QHash<int, int> groupUnit;
     QRectF all;
-    int found = 0;
+    auto united = [](const QRectF &a, const QRectF &b) {
+        // By hand, since a level line has an empty rectangle.
+        return QRectF(QPointF(std::min(a.left(), b.left()), std::min(a.top(), b.top())),
+                      QPointF(std::max(a.right(), b.right()), std::max(a.bottom(), b.bottom())));
+    };
     for (const BoardItem &item : m_items) {
         if (!m_selected.contains(item.id) || item.isConnector())
             continue;
-        // United by hand, since a level line has an empty rectangle.
         const QRectF b = bounds(item);
-        all = found++ == 0 ? b
-                           : QRectF(QPointF(std::min(all.left(), b.left()), std::min(all.top(), b.top())),
-                                    QPointF(std::max(all.right(), b.right()), std::max(all.bottom(), b.bottom())));
+        all = unitOf.isEmpty() ? b : united(all, b);
+        if (item.group != 0 && groupUnit.contains(item.group)) {
+            const int unit = groupUnit.value(item.group);
+            units[unit] = united(units[unit], b);
+            unitOf.insert(item.id, unit);
+            continue;
+        }
+        if (item.group != 0)
+            groupUnit.insert(item.group, units.size());
+        unitOf.insert(item.id, units.size());
+        units.append(b);
     }
+    const int found = units.size();
     if (found < 2)
         return;
     // Spread out: the things keep their order and the room they take up
     // together, and the gaps between one and the next all become the same.
     // What they overlap by is evened out the same way.
     const bool across = edge == QLatin1String("spreadAcross"), down = edge == QLatin1String("spreadDown");
-    QHash<int, QPointF> spread;
+    QVector<QPointF> shifts(found);
     if (across || down) {
         if (found < 3)
             return;
-        QVector<QPair<int, QRectF>> order;
+        QVector<int> order(found);
+        std::iota(order.begin(), order.end(), 0);
         double taken = 0;
-        for (const BoardItem &item : m_items) {
-            if (!m_selected.contains(item.id) || item.isConnector())
-                continue;
-            const QRectF b = bounds(item);
-            order.append({item.id, b});
+        for (const QRectF &b : std::as_const(units))
             taken += across ? b.width() : b.height();
-        }
-        std::stable_sort(order.begin(), order.end(), [&](const auto &a, const auto &b) {
-            return across ? a.second.center().x() < b.second.center().x() : a.second.center().y() < b.second.center().y();
+        std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+            return across ? units[a].center().x() < units[b].center().x()
+                          : units[a].center().y() < units[b].center().y();
         });
-        const double gap = ((across ? all.width() : all.height()) - taken) / (order.size() - 1);
+        const double gap = ((across ? all.width() : all.height()) - taken) / (found - 1);
         double at = across ? all.left() : all.top();
-        for (const auto &[id, b] : std::as_const(order)) {
-            spread.insert(id, across ? QPointF(at - b.left(), 0) : QPointF(0, at - b.top()));
+        for (int unit : std::as_const(order)) {
+            const QRectF &b = units[unit];
+            shifts[unit] = across ? QPointF(at - b.left(), 0) : QPointF(0, at - b.top());
             at += (across ? b.width() : b.height()) + gap;
         }
+    } else {
+        for (int unit = 0; unit < found; ++unit) {
+            const QRectF &b = units[unit];
+            // Centered on each other: across, on the line down the middle of
+            // them all, or up and down, on the line across it.
+            shifts[unit] = edge == QLatin1String("left") ? QPointF(all.left() - b.left(), 0)
+                         : edge == QLatin1String("right") ? QPointF(all.right() - b.right(), 0)
+                         : edge == QLatin1String("top") ? QPointF(0, all.top() - b.top())
+                         : edge == QLatin1String("bottom") ? QPointF(0, all.bottom() - b.bottom())
+                         : edge == QLatin1String("center") ? QPointF(all.center().x() - b.center().x(), 0)
+                         : edge == QLatin1String("middle") ? QPointF(0, all.center().y() - b.center().y())
+                                                           : QPointF();
+        }
     }
-    auto shift = [&](const BoardItem &item) {
-        if (across || down)
-            return spread.value(item.id);
-        const QRectF b = bounds(item);
-        if (edge == QLatin1String("left")) return QPointF(all.left() - b.left(), 0);
-        if (edge == QLatin1String("right")) return QPointF(all.right() - b.right(), 0);
-        if (edge == QLatin1String("top")) return QPointF(0, all.top() - b.top());
-        if (edge == QLatin1String("bottom")) return QPointF(0, all.bottom() - b.bottom());
-        // Centered on each other: across, on the line down the middle of
-        // them all, or up and down, on the line across it.
-        if (edge == QLatin1String("center")) return QPointF(all.center().x() - b.center().x(), 0);
-        if (edge == QLatin1String("middle")) return QPointF(0, all.center().y() - b.center().y());
-        return QPointF();
-    };
+    auto shift = [&](const BoardItem &item) { return shifts[unitOf.value(item.id)]; };
     // Each selected thing moves its own way, and what is in a selected frame
     // moves with it: with the smallest, when frames are inside each other.
     QHash<int, QPointF> by;
@@ -888,6 +983,7 @@ void Board::removeIds(QSet<int> ids) {
     }
     if (!any)
         return;
+    pruneGroups();
     QSet<int> selection = m_selected;
     selection.subtract(ids);
     setSelection(selection);
@@ -908,7 +1004,9 @@ void Board::removeItem(int id) {
     removeIds({id});
 }
 
-void Board::setSelection(const QSet<int> &selection) {
+// Whatever is picked, everything grouped with it is picked too.
+void Board::setSelection(const QSet<int> &picked) {
+    const QSet<int> selection = withGroups(picked);
     if (selection == m_selected)
         return;
     const QSet<int> before = m_selected;
@@ -927,9 +1025,13 @@ void Board::selectOnly(int id) {
 void Board::toggle(int id) {
     if (!find(id))
         return;
+    // A group goes in or out whole.
+    const QSet<int> whole = withGroups({id});
     QSet<int> selection = m_selected;
-    if (!selection.remove(id))
-        selection.insert(id);
+    if (selection.contains(id))
+        selection.subtract(whole);
+    else
+        selection.unite(whole);
     setSelection(selection);
 }
 
@@ -1242,7 +1344,7 @@ QVariantMap Board::item(int id) const {
     if (!item)
         return {};
     return {{"id", item->id}, {"kind", item->kind}, {"x", item->x}, {"y", item->y}, {"w", item->w},
-            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke},
+            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke}, {"group", item->group},
             {"fontSize", item->fontSize},
             {"rotation", item->rotation}, {"icon", item->icon}};
 }
@@ -1293,7 +1395,7 @@ void Board::restore(const Snapshot &snapshot) {
     for (int id : std::as_const(m_selected))
         if (m_rows.contains(id))
             selection.insert(id);
-    m_selected = selection;
+    m_selected = withGroups(selection);
     endResetModel();
     emit countChanged();
     emit selectionChanged();
@@ -1369,9 +1471,15 @@ bool Board::insertJson(const QJsonArray &array, const QPointF &center, bool atCe
     const QPointF offset = atCenter ? center - all.center() : QPointF(24, 24);
 
     checkpoint();
-    QHash<int, int> renamed;
+    QHash<int, int> renamed, regrouped;
     QSet<int> selection;
     for (BoardItem item : incoming) {
+        // A copy of a group is a group of its own.
+        if (item.group != 0) {
+            if (!regrouped.contains(item.group))
+                regrouped.insert(item.group, m_nextId++);
+            item.group = regrouped.value(item.group);
+        }
         if (item.isConnector()) {
             if (!renamed.contains(item.from) || !renamed.contains(item.to))
                 continue;
@@ -1389,6 +1497,8 @@ bool Board::insertJson(const QJsonArray &array, const QPointF &center, bool atCe
         }
     }
     settleFrames();
+    // Only part of a group may have come, as what lay in a copied frame.
+    pruneGroups();
     setSelection(selection);
     return true;
 }
@@ -1447,7 +1557,7 @@ void Board::load(const QJsonObject &object) {
         if (item.id <= 0 || seen.contains(item.id) || !kinds().contains(item.kind))
             continue;
         seen.insert(item.id);
-        highest = std::max(highest, item.id);
+        highest = std::max({highest, item.id, item.group});
         m_items.append(item);
     }
     // A connector whose shape is missing has nothing to draw between.
@@ -1456,6 +1566,7 @@ void Board::load(const QJsonObject &object) {
     });
     m_nextId = std::max(object.value("nextId").toInt(1), highest + 1);
     sortFrames(m_items);
+    pruneGroups();
     reindex();
 
     const QJsonObject view = object.value("view").toObject();

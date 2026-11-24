@@ -813,6 +813,144 @@ private slots:
         QCOMPARE(backend.board()->count(), 1);
     }
 
+    void groupedThingsAreOne() {
+        Board board;
+        QSignalSpy grouping(&board, &Board::groupingChanged);
+        const int a = board.add("rect", 0, 0, 100, 100);
+        const int b = board.add("ellipse", 200, 50, 50, 50);
+        const int c = board.add("rect", 500, 300, 40, 40);
+        const int d = board.add("postit", 900, 900, 100, 100);
+        const int wire = board.link(a, b);
+
+        // One thing is no group; two are, and a connector is in none.
+        board.selectOnly(a);
+        QVERIFY(!board.canGroup());
+        QVERIFY(!board.canUngroup());
+        board.groupSelection();
+        QCOMPARE(board.find(a)->group, 0);
+        board.toggle(b);
+        board.toggle(wire);
+        QVERIFY(board.canGroup());
+        board.groupSelection();
+        const int group = board.find(a)->group;
+        QVERIFY(group != 0);
+        QCOMPARE(board.find(b)->group, group);
+        QCOMPARE(board.find(wire)->group, 0);
+        QVERIFY(!board.canGroup());
+        QVERIFY(board.canUngroup());
+        QVERIFY(grouping.count() > 0);
+
+        // Picking one picks them all: by a click, with Shift, and by a band
+        // that touches only one of them. With Shift again they all go.
+        board.clearSelection();
+        board.selectOnly(b);
+        QVERIFY(board.isSelected(a));
+        QCOMPARE(board.selectionCount(), 2);
+        board.selectOnly(c);
+        board.toggle(a);
+        QCOMPARE(board.selectionCount(), 3);
+        board.toggle(b);
+        QCOMPARE(board.selectionCount(), 1);
+        QVERIFY(board.isSelected(c));
+        board.selectInRect(190, 40, 20, 20, false);
+        QVERIFY(board.isSelected(a) && board.isSelected(b));
+
+        // They move as one, and are lined up as the one box around them:
+        // nothing in the group shifts against the rest of it.
+        board.moveSelection(10, 20);
+        QCOMPARE(QPointF(board.find(a)->x, board.find(a)->y), QPointF(10, 20));
+        QCOMPARE(QPointF(board.find(b)->x, board.find(b)->y), QPointF(210, 70));
+        board.moveSelection(-10, -20);
+        // Alone, a group has nothing to line up with.
+        QCOMPARE(board.arrangeCount(), 1);
+        board.alignSelection("left");
+        QCOMPARE(board.find(b)->x, 200.0);
+        board.toggle(c);
+        QCOMPARE(board.arrangeCount(), 2);
+        board.alignSelection("left");
+        QCOMPARE(board.find(a)->x, 0.0);
+        QCOMPARE(board.find(b)->x, 200.0);
+        QCOMPARE(board.find(c)->x, 0.0);
+        board.alignSelection("bottom");
+        QCOMPARE(board.find(a)->y, 240.0);
+        QCOMPARE(board.find(b)->y, 290.0);
+        QCOMPARE(board.find(c)->y, 300.0);
+        board.undo();
+        board.undo();
+
+        // Spaced out, a group takes one place among the others.
+        board.selectAll();
+        QCOMPARE(board.arrangeCount(), 3);
+        board.alignSelection("spreadAcross");
+        QCOMPARE(board.find(a)->x, 0.0);
+        QCOMPARE(board.find(b)->x, 200.0);
+        QCOMPARE(board.find(d)->x, 900.0);
+        // The gap on each side of the lone rectangle is the same.
+        QVERIFY(std::abs((board.find(c)->x - 250) - (900 - board.find(c)->x - 40)) < 1e-9);
+        board.undo();
+
+        // A copy of a group is a group of its own.
+        board.selectOnly(a);
+        QVERIFY(board.duplicate(0, 0, false));
+        QCOMPARE(board.selectionCount(), 2);
+        int copied = 0;
+        for (const BoardItem &item : board.items())
+            if (board.isSelected(item.id)) {
+                QVERIFY(item.group != 0 && item.group != group);
+                QVERIFY(copied == 0 || copied == item.group);
+                copied = item.group;
+            }
+        board.removeSelection();
+
+        // Grouping a group with something else makes one group of it all,
+        // and ungrouping lets every one of them go. Each is one step back.
+        board.selectOnly(a);
+        board.toggle(c);
+        QVERIFY(board.canGroup());
+        board.groupSelection();
+        QCOMPARE(board.arrangeCount(), 1);
+        QCOMPARE(board.find(c)->group, board.find(b)->group);
+        board.undo();
+        QCOMPARE(board.find(c)->group, 0);
+        QCOMPARE(board.find(b)->group, group);
+        board.selectOnly(a);
+        board.ungroupSelection();
+        QCOMPARE(board.find(a)->group, 0);
+        QCOMPARE(board.find(b)->group, 0);
+        board.selectOnly(a);
+        QCOMPARE(board.selectionCount(), 1);
+        board.undo();
+        // Back in the group, the rest of it is selected with it again.
+        QCOMPARE(board.find(b)->group, group);
+        QVERIFY(board.isSelected(b));
+
+        // It is saved with the board. A group left with one thing in it, by
+        // a deletion or in a file, is no group.
+        Board again;
+        again.load(board.toJson());
+        QCOMPARE(again.find(a)->group, again.find(b)->group);
+        QVERIFY(again.find(a)->group != 0);
+        again.selectOnly(a);
+        QCOMPARE(again.selectionCount(), 2);
+        // A new group never takes the number of one that is there.
+        again.selectOnly(c);
+        again.toggle(d);
+        again.groupSelection();
+        QVERIFY(again.find(c)->group != again.find(a)->group);
+        board.removeItem(b);
+        QCOMPARE(board.find(a)->group, 0);
+        again.load(QJsonObject{{"items", QJsonArray{
+            QJsonObject{{"id", 1}, {"kind", "rect"}, {"w", 10}, {"h", 10}, {"group", 7}},
+            QJsonObject{{"id", 2}, {"kind", "rect"}, {"w", 10}, {"h", 10}, {"group", 9}},
+            QJsonObject{{"id", 3}, {"kind", "rect"}, {"w", 10}, {"h", 10}, {"group", 9}}}}});
+        QCOMPARE(again.find(1)->group, 0);
+        QCOMPARE(again.find(2)->group, 9);
+        again.selectOnly(1);
+        again.toggle(2);
+        again.groupSelection();
+        QVERIFY(again.find(1)->group > 9);
+    }
+
     void outlinesAreSolidDashedOrDotted() {
         Board board;
         QSignalSpy shown(&board, &Board::shownStrokeChanged);
@@ -1941,6 +2079,40 @@ private slots:
         QCOMPARE(board->items().last().id, first);
         QTest::keyClick(window, Qt::Key_BracketLeft);
         QCOMPARE(board->items().first().id, first);
+
+        // Ctrl+G groups the selection, so picking one of them picks them
+        // all; the menu, below a line, takes the group apart again, and
+        // offers only what there is to do.
+        auto *menuItems = arrangeMenu->property("contentItem").value<QQuickItem *>();
+        QVERIFY(visualChild(menuItems, "arrange-line")->property("separator").toBool());
+        QVERIFY(!visualChild(menuItems, "arrange-group")->property("usable").toBool());
+        QVERIFY(!visualChild(menuItems, "arrange-ungroup")->property("usable").toBool());
+        board->selectAll();
+        const int everything = board->selectionCount();
+        QVERIFY(visualChild(menuItems, "arrange-group")->property("usable").toBool());
+        QTest::keySequence(window, QKeySequence("Ctrl+G"));
+        QVERIFY(board->find(first)->group != 0);
+        QVERIFY(!visualChild(menuItems, "arrange-group")->property("usable").toBool());
+        // One group is one thing: there is nothing to line it up with.
+        QVERIFY(!visualChild(menuItems, "arrange-left")->property("usable").toBool());
+        board->selectOnly(first);
+        QVERIFY(board->selectionCount() > 1);
+        QVERIFY(board->selectionCount() <= everything);
+        arrange("ungroup");
+        for (const BoardItem &item : board->items())
+            QCOMPARE(item.group, 0);
+        board->selectOnly(first);
+        QCOMPARE(board->selectionCount(), 1);
+        // One thing alone can't be grouped, from the menu or the keys.
+        QVERIFY(!visualChild(menuItems, "arrange-group")->property("usable").toBool());
+        QTest::keySequence(window, QKeySequence("Ctrl+G"));
+        QCOMPARE(board->find(first)->group, 0);
+        QTest::keySequence(window, QKeySequence("Ctrl+Shift+G"));
+        QTest::keySequence(window, QKeySequence::Undo);
+        QTest::keySequence(window, QKeySequence::Undo);
+        for (const BoardItem &item : board->items())
+            QCOMPARE(item.group, 0);
+        board->selectOnly(first);
 
         // I opens the icons; one picked and a click on the canvas places it
         // there, at a size to see, selected and ready to move or size.

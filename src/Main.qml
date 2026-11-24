@@ -183,6 +183,8 @@ ApplicationWindow {
     Shortcut { sequence: "Alt+V"; enabled: win.keys; onActivated: board.alignSelection("middle") }
     Shortcut { sequence: "Alt+Shift+H"; enabled: win.keys; onActivated: board.alignSelection("spreadAcross") }
     Shortcut { sequence: "Alt+Shift+V"; enabled: win.keys; onActivated: board.alignSelection("spreadDown") }
+    Shortcut { sequence: "Ctrl+G"; enabled: win.keys; onActivated: board.groupSelection() }
+    Shortcut { sequence: "Ctrl+Shift+G"; enabled: win.keys; onActivated: board.ungroupSelection() }
     Shortcut { sequence: "]"; enabled: win.keys; onActivated: board.bringToFront() }
     Shortcut { sequence: "["; enabled: win.keys; onActivated: board.sendToBack() }
     Shortcut { sequence: "Shift+Left"; enabled: win.keys; onActivated: win.nudge(-10, 0) }
@@ -854,22 +856,44 @@ ApplicationWindow {
                                     { name: "front", label: qsTr("Bring to front"), key: "]", needs: 1,
                                       icon: "M8 8 H17 V17 H8 Z M3 12 V3 H12" },
                                     { name: "back", label: qsTr("Send to back"), key: "[", needs: 1,
-                                      icon: "M3 3 H12 V12 H3 Z M17 8 V17 H8" }
+                                      icon: "M3 3 H12 V12 H3 Z M17 8 V17 H8" },
+                                    { name: "line", separator: true },
+                                    { name: "group", label: qsTr("Group"), key: "Ctrl+G",
+                                      icon: "M3 3 H17 V17 H3 Z M6 6 H10.5 V10.5 H6 Z M12 12 H14 V14 H12 Z" },
+                                    { name: "ungroup", label: qsTr("Ungroup"), key: "Ctrl+Shift+G",
+                                      icon: "M3 3 H10.5 V10.5 H3 Z M12.5 12.5 H17 V17 H12.5 Z" }
                                 ]
                                 delegate: Rectangle {
                                     id: arrangeRow
                                     required property var modelData
-                                    readonly property bool usable: board.selectionCount >= modelData.needs
+                                    readonly property bool separator: modelData.separator === true
+                                    // A group is lined up and spaced as one
+                                    // thing; the order moves whatever is selected.
+                                    readonly property bool usable: separator ? false
+                                        : modelData.name === "group" ? board.canGroup
+                                        : modelData.name === "ungroup" ? board.canUngroup
+                                        : modelData.needs === 1 ? board.selectionCount >= 1
+                                        : board.arrangeCount >= modelData.needs
                                     objectName: "arrange-" + modelData.name
                                     Layout.fillWidth: true
-                                    Layout.preferredWidth: arrangeLine.implicitWidth + 20
-                                    Layout.preferredHeight: 32
+                                    Layout.preferredWidth: separator ? 0 : arrangeLine.implicitWidth + 20
+                                    Layout.preferredHeight: separator ? 9 : 32
                                     radius: Math.min(4, theme.radius)
                                     color: usable && arrangeRowHover.hovered ? theme.colors.selection : "transparent"
-                                    opacity: usable ? 1 : 0.4
+                                    opacity: usable || separator ? 1 : 0.4
+
+                                    Rectangle {
+                                        visible: arrangeRow.separator
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        height: 1
+                                        color: theme.colors.selection
+                                    }
 
                                     RowLayout {
                                         id: arrangeLine
+                                        visible: !arrangeRow.separator
                                         anchors.fill: parent
                                         anchors.leftMargin: 10
                                         anchors.rightMargin: 10
@@ -885,16 +909,16 @@ ApplicationWindow {
                                                 fillColor: "transparent"
                                                 capStyle: ShapePath.RoundCap
                                                 joinStyle: ShapePath.RoundJoin
-                                                PathSvg { path: arrangeRow.modelData.icon }
+                                                PathSvg { path: arrangeRow.modelData.icon || "" }
                                             }
                                         }
                                         Label {
                                             Layout.fillWidth: true
-                                            text: arrangeRow.modelData.label
+                                            text: arrangeRow.modelData.label || ""
                                         }
                                         Label {
                                             Layout.leftMargin: 14
-                                            text: arrangeRow.modelData.key
+                                            text: arrangeRow.modelData.key || ""
                                             opacity: 0.6
                                         }
                                     }
@@ -907,6 +931,10 @@ ApplicationWindow {
                                                 board.bringToFront()
                                             else if (name === "back")
                                                 board.sendToBack()
+                                            else if (name === "group")
+                                                board.groupSelection()
+                                            else if (name === "ungroup")
+                                                board.ungroupSelection()
                                             else
                                                 board.alignSelection(name)
                                             arrangeMenu.close()
@@ -1297,6 +1325,7 @@ ApplicationWindow {
             { keys: "Alt+H · Alt+V", action: qsTr("Center the selected shapes on each other, across or up and down") },
             { keys: "Alt+Shift+H · V", action: qsTr("Space the selected shapes evenly, across or up and down") },
             { keys: "]  [", action: qsTr("Bring to the front or send to the back") },
+            { keys: "Ctrl+G · Ctrl+Shift+G", action: qsTr("Group the selection, or take the group apart") },
             { keys: "+  −  0", action: qsTr("Zoom in, out, and back to 100%") },
             { keys: "Shift+F", action: qsTr("Fit everything in the window") },
             { keys: "Space", action: qsTr("Hold and drag to pan") },

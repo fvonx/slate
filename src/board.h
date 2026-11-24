@@ -24,6 +24,7 @@ struct BoardItem {
     int fontSize = 24;
     double rotation = 0; // degrees, about the middle of its box
     int from = 0, to = 0;
+    int group = 0; // the group it is part of, or 0: grouped things are selected and arranged as one
 
     bool isConnector() const { return kind == QLatin1String("connector"); }
     bool isLine() const { return kind == QLatin1String("line"); }
@@ -37,7 +38,7 @@ struct BoardItem {
     }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
-            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
+            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to && group == o.group;
     }
 };
 
@@ -60,6 +61,9 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(QRectF groupBounds READ movableBounds NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
     Q_PROPERTY(QString shownStroke READ shownStroke NOTIFY shownStrokeChanged)
+    Q_PROPERTY(int arrangeCount READ arrangeCount NOTIFY groupingChanged)
+    Q_PROPERTY(bool canGroup READ canGroup NOTIFY groupingChanged)
+    Q_PROPERTY(bool canUngroup READ canUngroup NOTIFY groupingChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
     Q_PROPERTY(bool hasView READ hasView NOTIFY loaded)
@@ -93,6 +97,13 @@ public:
     // How many things are selected that can be moved or sized, connectors
     // aside: two or more are sized together, by the box around them.
     int groupCount() const;
+    // How many things there are to line up or space out: a group counts as
+    // one, and so does each thing that is in none.
+    int arrangeCount() const;
+    // Two or more things that aren't one group already can be grouped, and
+    // anything in a group can be taken out of it.
+    bool canGroup() const;
+    bool canUngroup() const;
     QStringList iconNames() const;
     Q_INVOKABLE QString iconPath(const QString &name) const;
     // The color the color menu marks: that of what is selected, when it all
@@ -138,6 +149,11 @@ public:
     // middle (center, middle), or spaces three or more evenly between the
     // outermost two (spreadAcross, spreadDown).
     Q_INVOKABLE void alignSelection(const QString &edge);
+    // Grouped things are selected together from then on, so they move, size,
+    // line up, and change places in the pile as one. Groups among them are
+    // taken into the new one; ungrouping lets every one go its own way.
+    Q_INVOKABLE void groupSelection();
+    Q_INVOKABLE void ungroupSelection();
     Q_INVOKABLE void bringToFront();
     Q_INVOKABLE void sendToBack();
     Q_INVOKABLE void setMeasuredSize(int id, double w, double h);
@@ -192,6 +208,7 @@ signals:
     void shownColorChanged();
     void shownStrokeChanged();
     void undoChanged();
+    void groupingChanged();
     // A board was opened: the window takes its saved view.
     void loaded();
     // Something worth saving changed.
@@ -209,6 +226,10 @@ private:
     int insert(BoardItem item);
     void removeIds(QSet<int> ids);
     void setSelection(const QSet<int> &selection);
+    // The ids, and everything grouped with any of them.
+    QSet<int> withGroups(const QSet<int> &ids) const;
+    // A group of one is no group.
+    void pruneGroups();
     void geometryChanged(const QSet<int> &ids);
     void applyMeasuredSize(int id, double w, double h);
     void reorderSelection(bool toFront);

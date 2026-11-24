@@ -495,7 +495,8 @@ Item {
             return { id: board.selectedId, edge: own, rotation: board.selectedRotation }
         const w = toWorld(pt), reach = 7 / zoom
         const id = board.itemAt(w.x, w.y, reach)
-        if (!id || (board.selectionCount > 1 && board.isSelected(id)))
+        // What is in a group is sized with the group, by the box around it.
+        if (!id || (board.selectionCount > 1 && board.isSelected(id)) || board.item(id).group)
             return null
         const side = board.outlineSide(id, w.x, w.y, reach)
         return side ? { id: id, edge: side, rotation: board.item(id).rotation } : null
