@@ -170,7 +170,7 @@ void paintBoard(QPainter &painter, const Board &board, const BoardLook &look) {
             paintShape(painter, item, look);
     for (const BoardItem &item : board.items())
         if (item.isConnector())
-            paintStroke(painter, board.line(item), look.foreground, true);
+            paintStroke(painter, board.line(item), look.foreground, true, item.stroke);
     for (const BoardItem &item : board.items()) {
         if (item.isConnector() || item.isFrame())
             continue;

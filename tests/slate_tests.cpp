@@ -977,6 +977,21 @@ private slots:
         for (int id : {note, words})
             QCOMPARE(board.find(id)->stroke, QString());
 
+        // A connection is styled like a line, once it is selected; a new
+        // one starts out solid whatever was picked last.
+        const int wire = board.link(box, note);
+        QCOMPARE(board.find(wire)->stroke, QString());
+        board.selectOnly(wire);
+        QCOMPARE(board.shownStroke(), QString());
+        board.setSelectionStroke("dashed");
+        QCOMPARE(board.find(wire)->stroke, QString("dashed"));
+        QCOMPARE(board.find(box)->stroke, QString("dotted"));
+        QCOMPARE(board.data(board.index(board.items().indexOf(*board.find(wire))), Board::StrokeRole).toString(),
+                 QString("dashed"));
+        board.selectAll();
+        board.setSelectionStroke("dotted");
+        QCOMPARE(board.find(wire)->stroke, QString("dotted"));
+
         // Anything else is solid, and one undo takes a change back.
         board.setSelectionStroke("wavy");
         QCOMPARE(board.find(box)->stroke, QString());

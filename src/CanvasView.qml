@@ -1659,7 +1659,8 @@ Item {
                 capStyle: stroke.strokeStyle === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
                 startX: 0
                 startY: 0
-                PathLine { x: stroke.length; y: 0 }
+                // An arrow's line stops inside its head, so the tip stays sharp.
+                PathLine { x: Math.max(0, stroke.length - (stroke.arrow ? 6 : 0)); y: 0 }
             }
         }
         Shape {

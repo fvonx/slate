@@ -31,10 +31,10 @@ struct BoardItem {
     bool isShape() const { return !isConnector() && !isLine(); }
     bool isFrame() const { return kind == QLatin1String("frame"); }
     // The outlines that can be dashed or dotted: the drawn shapes, the frame,
-    // and the line.
+    // the line, and the connector.
     bool takesStroke() const {
         return kind == QLatin1String("rect") || kind == QLatin1String("ellipse") || kind == QLatin1String("triangle")
-            || isFrame() || isLine();
+            || isFrame() || isLine() || isConnector();
     }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
