@@ -106,9 +106,12 @@ Item {
 
     function setZoomAround(pt, z) {
         const w = toWorld(pt)
+        batching = true
         zoom = z
         camX = pt.x - w.x * z
         camY = pt.y - w.y * z
+        batching = false
+        saveView()
     }
 
     // A wheel notch or a key glides to its zoom; a pinch or a touchpad
@@ -125,6 +128,7 @@ Item {
     }
 
     function zoomAt(pt, factor, animate) {
+        stopGlide()
         if (!animate) {
             zoomAnim.stop()
             setZoomAround(pt, clampZoom(zoom * factor))
@@ -138,10 +142,121 @@ Item {
         zoomAnim.start()
     }
 
+    // --- Two fingers on a touchpad -----------------------------------------
+    //
+    // The board is held by the fingers: every scroll event moves the camera
+    // at once and by exactly what it says, fractions of a pixel included, as
+    // a drag with Space held does. Lifting the fingers while they move lets
+    // the board glide on and come to rest.
+
+    // The movement a touchpad event carries. Qt rounds the pixel delta to
+    // whole pixels, which turns a slow stroke into steps; on Wayland the
+    // angle delta holds the same movement twelve times finer. It is used
+    // when the two agree, so a device that fills them differently falls
+    // back to whole pixels.
+    function fingerDelta(wheel) {
+        const px = wheel.pixelDelta, fine = Qt.point(wheel.angleDelta.x / 12, wheel.angleDelta.y / 12)
+        const agree = Math.abs(fine.x - px.x) <= 1 && Math.abs(fine.y - px.y) <= 1
+        // Hyprland slows touchpad scrolling down for reading; a board moves
+        // as far as the fingers do.
+        const gain = 1 / theme.scrollFactor
+        return agree ? Qt.point(fine.x * gain, fine.y * gain) : Qt.point(px.x * gain, px.y * gain)
+    }
+
+    // The last moments of the stroke, from which the glide takes its speed.
+    property var strokeTrail: []
+    property real glideVX: 0
+    property real glideVY: 0
+    readonly property bool gliding: glide.running
+
+    function fingerPan(wheel) {
+        const now = Date.now()
+        if (wheel.phase === Qt.ScrollBegin)
+            strokeTrail = []
+        stopGlide()
+        zoomAnim.stop()
+        const d = fingerDelta(wheel)
+        if (d.x !== 0 || d.y !== 0) {
+            moveCamera(camX + d.x, camY + d.y)
+            strokeTrail.push({ t: now, x: d.x, y: d.y })
+            while (strokeTrail.length > 1 && now - strokeTrail[0].t > 90)
+                strokeTrail.shift()
+        }
+        if (wheel.phase === Qt.ScrollEnd)
+            startGlide(now)
+    }
+
+    // Only a stroke that was still moving when the fingers left glides: one
+    // that slowed to a stop, or whose touchpad already sent its own
+    // momentum, ends with nothing recent in its trail.
+    function startGlide(now) {
+        const recent = strokeTrail.filter(e => now - e.t <= 90)
+        strokeTrail = []
+        if (recent.length < 2) {
+            settle()
+            return
+        }
+        // The first event's movement happened before the span measured.
+        const span = Math.max(recent[recent.length - 1].t - recent[0].t, 8) / 1000
+        let dx = 0, dy = 0
+        for (let i = 1; i < recent.length; ++i) {
+            dx += recent[i].x
+            dy += recent[i].y
+        }
+        const limit = 6000
+        glideVX = Math.max(-limit, Math.min(limit, dx / span))
+        glideVY = Math.max(-limit, Math.min(limit, dy / span))
+        if (Math.hypot(glideVX, glideVY) < 200) {
+            settle()
+            return
+        }
+        glide.start()
+    }
+
+    function stopGlide() {
+        if (glide.running)
+            glide.stop()
+    }
+
+    FrameAnimation {
+        id: glide
+        onTriggered: {
+            // A frame that took long must not throw the board.
+            const dt = Math.min(frameTime, 0.05)
+            const keep = Math.exp(-dt / 0.3)
+            view.moveCamera(view.camX + view.glideVX * dt, view.camY + view.glideVY * dt)
+            view.glideVX *= keep
+            view.glideVY *= keep
+            if (Math.hypot(view.glideVX, view.glideVY) < 20) {
+                stop()
+                view.settle()
+            }
+        }
+    }
+
+    // At rest the board sits on whole device pixels, so lines and text are
+    // crisp; while it moves it may sit between them, so it moves evenly.
+    function settle() {
+        const dpr = Screen.devicePixelRatio
+        moveCamera(Math.round(camX * dpr) / dpr, Math.round(camY * dpr) / dpr)
+    }
+
+    // Moves the camera in one step, so the view is saved once rather than
+    // once for each coordinate.
+    property bool batching: false
+    function moveCamera(x, y) {
+        batching = true
+        camX = x
+        camY = y
+        batching = false
+        saveView()
+    }
+
     function resetZoom() { zoomAt(Qt.point(width / 2, height / 2), 1 / zoom, true) }
 
     function fit() {
         zoomAnim.stop()
+        stopGlide()
         const b = board.contentBounds()
         if (board.count === 0) {
             zoom = 1
@@ -159,6 +274,7 @@ Item {
     // origin in the middle, once the window has a size to find the middle of.
     function restoreView() {
         zoomAnim.stop()
+        stopGlide()
         restoring = true
         const saved = board.hasView, x = board.viewX, y = board.viewY, z = board.viewZoom
         mode = ""
@@ -181,7 +297,7 @@ Item {
     }
 
     function saveView() {
-        if (!restoring && !pendingCenter)
+        if (!restoring && !batching && !pendingCenter)
             board.setView(camX, camY, zoom)
     }
 
@@ -422,6 +538,7 @@ Item {
     }
 
     function press(m) {
+        stopGlide()
         if (editing)
             commitEdit()
         view.forceActiveFocus()
@@ -1327,16 +1444,22 @@ Item {
         // and zoom with Ctrl held.
         onWheel: (wheel) => {
             const at = Qt.point(wheel.x, wheel.y)
-            const touchpad = wheel.pixelDelta.x !== 0 || wheel.pixelDelta.y !== 0
+            // A touchpad is known by its scroll phase, not by its pixel delta:
+            // a slow stroke carries less than a pixel per event, and Qt reports
+            // that as a zero pixel delta beside a nonzero angle delta, which
+            // used to read as a mouse wheel and zoomed in the middle of a pan.
+            const touchpad = wheel.phase !== Qt.NoScrollPhase
+                || wheel.device.type === PointerDevice.TouchPad
+                || wheel.pixelDelta.x !== 0 || wheel.pixelDelta.y !== 0
+            if (!touchpad || (wheel.modifiers & Qt.ControlModifier))
+                view.stopGlide()
             if (wheel.modifiers & Qt.ControlModifier) {
                 if (touchpad)
-                    view.zoomAt(at, Math.exp(wheel.pixelDelta.y * 0.008), false)
+                    view.zoomAt(at, Math.exp(view.fingerDelta(wheel).y * theme.scrollFactor * 0.008), false)
                 else
                     view.zoomAt(at, Math.pow(1.25, wheel.angleDelta.y / 120), true)
             } else if (touchpad) {
-                zoomAnim.stop()
-                view.camX += wheel.pixelDelta.x
-                view.camY += wheel.pixelDelta.y
+                view.fingerPan(wheel)
             } else if (wheel.modifiers & Qt.ShiftModifier) {
                 view.camX += (wheel.angleDelta.y || wheel.angleDelta.x) / 2
             } else if (wheel.angleDelta.y !== 0) {
@@ -1347,9 +1470,22 @@ Item {
         }
     }
 
+    // A pinch zooms on the pointer.
     PinchHandler {
         target: null
+        onActiveChanged: if (active) view.stopGlide()
         onScaleChanged: (delta) => view.zoomAt(centroid.position, delta, false)
+    }
+
+    // Moving the two fingers together while pinching still pans: a touchpad
+    // decides for itself whether two fingers scroll or pinch, and a pan it
+    // took for a pinch must not turn into nothing but a wobbling zoom.
+    PinchPan {
+        anchors.fill: parent
+        onMoved: (dx, dy) => {
+            view.stopGlide()
+            view.moveCamera(view.camX + dx, view.camY + dy)
+        }
     }
 
     // --- Delegates ---------------------------------------------------------------

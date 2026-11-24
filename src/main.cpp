@@ -9,6 +9,7 @@
 
 #include "backend.h"
 #include "dotgrid.h"
+#include "pinchpan.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -33,6 +34,7 @@ int main(int argc, char *argv[]) {
     Theme theme;
     Backend backend;
     DotGrid::registerType();
+    PinchPan::registerType();
 
     QQmlApplicationEngine engine;
     QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);

@@ -52,8 +52,9 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
     connect(&m_debounce, &QTimer::timeout, this, &Theme::reload);
 
-    // Corners follow Hyprland's effective rounding, which themes and personal
-    // overrides can both set, so ask hyprctl rather than reading its config.
+    // Corners follow Hyprland's effective rounding, and panning its touchpad
+    // scroll factor, which themes and personal overrides can both set, so ask
+    // hyprctl rather than reading its config.
     // Without Hyprland the corners stay sharp, like Omarchy's default.
     const bool hyprland = directory.isEmpty() && !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE");
     m_hyprctl = !hyprctl.isEmpty() ? hyprctl : hyprland ? QStandardPaths::findExecutable("hyprctl") : QString();
@@ -63,15 +64,32 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
     connect(&m_roundingProcess, &QProcess::errorOccurred, this, [this] { m_roundingTimeout.stop(); });
     connect(&m_roundingProcess, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
         m_roundingTimeout.stop();
-        const auto value = QJsonDocument::fromJson(m_roundingProcess.readAllStandardOutput()).object().value("int");
-        if (code == 0 && status == QProcess::NormalExit && value.isDouble() && value.toInt(-1) >= 0
-            && value.toInt() != m_radius) {
-            m_radius = value.toInt();
-            emit changed();
+        // A batch answers with one JSON object per line, each naming its option.
+        bool differs = false;
+        const QByteArrayList answers = m_roundingProcess.readAllStandardOutput().split('\n');
+        for (const QByteArray &line : answers) {
+            if (code != 0 || status != QProcess::NormalExit || line.trimmed().isEmpty())
+                continue;
+            const QJsonObject answer = QJsonDocument::fromJson(line).object();
+            if (answer.value("option").toString() == "input:touchpad:scroll_factor") {
+                const double factor = answer.value("float").toDouble();
+                if (factor > 0 && factor != m_scrollFactor) {
+                    m_scrollFactor = factor;
+                    differs = true;
+                }
+                continue;
+            }
+            const auto value = answer.value("int");
+            if (value.isDouble() && value.toInt(-1) >= 0 && value.toInt() != m_radius) {
+                m_radius = value.toInt();
+                differs = true;
+            }
         }
+        if (differs)
+            emit changed();
         if (m_roundingAgain) {
             m_roundingAgain = false;
-            refreshRounding();
+            refreshHyprland();
         }
     });
 
@@ -85,12 +103,12 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
     connect(&m_events, &QLocalSocket::readyRead, this, [this] {
         while (m_events.canReadLine())
             if (m_events.readLine().startsWith("configreloaded>>"))
-                refreshRounding();
+                refreshHyprland();
     });
     // Asked again on every connection, since a reload may have come between.
     connect(&m_events, &QLocalSocket::connected, this, [this] {
         m_reconnect.setInterval(1000);
-        refreshRounding();
+        refreshHyprland();
     });
     // A socket that can't be reached or drops is tried again, less often each time.
     m_reconnect.setSingleShot(true);
@@ -104,7 +122,7 @@ Theme::Theme(const QString &directory, QObject *parent, const QString &hyprctl, 
     });
     if (!events.isEmpty())
         m_events.connectToServer(events, QIODevice::ReadOnly);
-    refreshRounding();
+    refreshHyprland();
     reload();
 }
 
@@ -118,7 +136,7 @@ Theme::~Theme() {
     }
 }
 
-void Theme::refreshRounding() {
+void Theme::refreshHyprland() {
     if (m_hyprctl.isEmpty())
         return;
     // A query still running may have read the value from before the reload.
@@ -126,7 +144,8 @@ void Theme::refreshRounding() {
         m_roundingAgain = true;
         return;
     }
-    m_roundingProcess.start(m_hyprctl, {"-j", "getoption", "decoration:rounding"});
+    m_roundingProcess.start(m_hyprctl, {"-j", "--batch",
+                                        "getoption decoration:rounding; getoption input:touchpad:scroll_factor"});
     m_roundingTimeout.start();
 }
 

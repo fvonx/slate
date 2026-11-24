@@ -14,12 +14,15 @@
 #include <QtTest>
 
 #include <QSignalSpy>
+#include <QNativeGestureEvent>
+#include <QPointingDevice>
 #include <QWheelEvent>
 #include <functional>
 #include <cmath>
 
 #include "backend.h"
 #include "dotgrid.h"
+#include "pinchpan.h"
 #include "theme.h"
 #include "translator.h"
 
@@ -947,6 +950,24 @@ private slots:
         QTRY_COMPARE(theme.radius(), 8);
     }
 
+    void themeFollowsTheTouchpadScrollFactor() {
+        QTemporaryDir dir, hypr;
+        const QString command = fakeHyprctl(hypr.path());
+        // Without Hyprland's answer the board pans one to one.
+        QVERIFY(write(hypr.filePath("response.json"), ""));
+        {
+            Theme theme(dir.path());
+            QCOMPARE(theme.scrollFactor(), 1.0);
+        }
+        // hyprctl --batch answers one object per line, with blank lines between.
+        QVERIFY(write(hypr.filePath("response.json"),
+                      "{\"option\": \"decoration:rounding\", \"int\": 6, \"set\": true }\n\n\n"
+                      "{\"option\": \"input:touchpad:scroll_factor\", \"float\": 0.400000, \"set\": true }\n"));
+        Theme theme(dir.path(), nullptr, command, hypr.filePath("events.sock"));
+        QTRY_COMPARE(theme.radius(), 6);
+        QCOMPARE(theme.scrollFactor(), 0.4);
+    }
+
     void translatorFallsBackToEnglish() {
         QTemporaryDir dir;
         Translator translator(dir.path() + "/language", dir.path());
@@ -1074,6 +1095,7 @@ private slots:
         backend.setExportDirectory(dir.path() + "/downloads");
         Board *board = backend.board();
         DotGrid::registerType();
+        PinchPan::registerType();
 
         QQmlApplicationEngine engine;
         QStringList warnings;
@@ -1483,6 +1505,91 @@ private slots:
         }
         QCOMPARE(QPointF(view->property("camX").toDouble(), view->property("camY").toDouble()),
                  rest + QPointF(30, -20));
+
+        // A slow stroke moves less than a pixel per event, so it arrives with
+        // no pixel delta but an angle delta. It still pans, by that fraction
+        // of a pixel, and never zooms.
+        for (int i = 0; i < 3; ++i) {
+            QWheelEvent slow(under, window->mapToGlobal(under), {}, {0, 6}, Qt::NoButton, Qt::NoModifier,
+                             Qt::ScrollUpdate, false);
+            QCoreApplication::sendEvent(window, &slow);
+        }
+        QCOMPARE(view->property("zoom").toDouble(), 1.0);
+        QCOMPARE(QPointF(view->property("camX").toDouble(), view->property("camY").toDouble()),
+                 rest + QPointF(30, -18.5));
+
+        // Fingers that stopped before they left leave the board where it is,
+        // on a whole pixel.
+        QTest::qWait(150);
+        QWheelEvent end(under, window->mapToGlobal(under), {}, {}, Qt::NoButton, Qt::NoModifier, Qt::ScrollEnd,
+                        false);
+        QCoreApplication::sendEvent(window, &end);
+        QVERIFY(!view->property("gliding").toBool());
+        QCOMPARE(view->property("zoom").toDouble(), 1.0);
+        const QPointF settled(view->property("camX").toDouble(), view->property("camY").toDouble());
+        QCOMPARE(settled.x(), std::round(settled.x()));
+        QCOMPARE(settled.y(), std::round(settled.y()));
+        QVERIFY((settled - (rest + QPointF(30, -18.5))).manhattanLength() <= 1.0);
+
+        // Fingers lifted mid-stroke let the board glide on the way it was
+        // going, and it comes to rest by itself.
+        QWheelEvent begin(under, window->mapToGlobal(under), {}, {}, Qt::NoButton, Qt::NoModifier,
+                          Qt::ScrollBegin, false);
+        QCoreApplication::sendEvent(window, &begin);
+        for (int i = 0; i < 5; ++i) {
+            QWheelEvent fast(under, window->mapToGlobal(under), {20, 0}, {240, 0}, Qt::NoButton, Qt::NoModifier,
+                             Qt::ScrollUpdate, false);
+            QCoreApplication::sendEvent(window, &fast);
+            QTest::qWait(10);
+        }
+        const double lifted = view->property("camX").toDouble();
+        QCOMPARE(lifted, settled.x() + 100);
+        QWheelEvent lift(under, window->mapToGlobal(under), {}, {}, Qt::NoButton, Qt::NoModifier, Qt::ScrollEnd,
+                         false);
+        QCoreApplication::sendEvent(window, &lift);
+        QVERIFY(view->property("gliding").toBool());
+        QTRY_VERIFY_WITH_TIMEOUT(!view->property("gliding").toBool(), 5000);
+        QVERIFY(view->property("camX").toDouble() > lifted + 50);
+        QCOMPARE(view->property("camY").toDouble(), settled.y());
+
+        // A press stops a glide where it is.
+        QCoreApplication::sendEvent(window, &begin);
+        for (int i = 0; i < 5; ++i) {
+            QWheelEvent fast(under, window->mapToGlobal(under), {20, 0}, {240, 0}, Qt::NoButton, Qt::NoModifier,
+                             Qt::ScrollUpdate, false);
+            QCoreApplication::sendEvent(window, &fast);
+            QTest::qWait(10);
+        }
+        QCoreApplication::sendEvent(window, &lift);
+        QVERIFY(view->property("gliding").toBool());
+        QTest::mousePress(window, Qt::MiddleButton, {}, {1100, 650});
+        QVERIFY(!view->property("gliding").toBool());
+        QTest::mouseRelease(window, Qt::MiddleButton, {}, {1100, 650});
+
+        // Two fingers the touchpad took for a pinch still pan as they move,
+        // and zoom on the pointer as they spread.
+        const QPointF prePinch(view->property("camX").toDouble(), view->property("camY").toDouble());
+        const QPointingDevice *pad = QPointingDevice::primaryPointingDevice();
+        const QPointF global = window->mapToGlobal(under);
+        QNativeGestureEvent pinchBegin(Qt::BeginNativeGesture, pad, 2, under, under, global, 0, {});
+        QCoreApplication::sendEvent(window, &pinchBegin);
+        QNativeGestureEvent pinchPan(Qt::PanNativeGesture, pad, 2, under, under, global, 0, {12, -7});
+        QCoreApplication::sendEvent(window, &pinchPan);
+        QCOMPARE(QPointF(view->property("camX").toDouble(), view->property("camY").toDouble()),
+                 prePinch + QPointF(12, -7));
+        QCOMPARE(view->property("zoom").toDouble(), 1.0);
+        // The movement may also come along with the zoom, and counts the same.
+        QNativeGestureEvent pinchMove(Qt::ZoomNativeGesture, pad, 2, under, under, global, 0, {4, 3});
+        QCoreApplication::sendEvent(window, &pinchMove);
+        QCOMPARE(QPointF(view->property("camX").toDouble(), view->property("camY").toDouble()),
+                 prePinch + QPointF(16, -4));
+        QCOMPARE(view->property("zoom").toDouble(), 1.0);
+        QNativeGestureEvent pinchZoom(Qt::ZoomNativeGesture, pad, 2, under, under, global, 0.25, {});
+        QCoreApplication::sendEvent(window, &pinchZoom);
+        QCOMPARE(view->property("zoom").toDouble(), 1.25);
+        QNativeGestureEvent pinchEnd(Qt::EndNativeGesture, pad, 2, under, under, global, 0, {});
+        QCoreApplication::sendEvent(window, &pinchEnd);
+        view->setProperty("zoom", 1.0);
         view->setProperty("camX", origin.x());
         view->setProperty("camY", origin.y());
 
@@ -1808,6 +1915,7 @@ private slots:
         Backend backend(dir.path() + "/boards");
         Board *board = backend.board();
         DotGrid::registerType();
+        PinchPan::registerType();
 
         QQmlApplicationEngine engine;
         QStringList warnings;
