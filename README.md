@@ -2,7 +2,7 @@
 
 ![Slate with a small plan sketched on it](share/screenshot.png)
 
-Sketch shapes and the connections between them on an infinite canvas, for Omarchy. Rectangles, circles, triangles, post-its, lines, and text, each of which can be turned; connections that stay attached while you move things around; as many boards as you like, each saved on its own as you work.
+Sketch shapes and the connections between them on an infinite canvas, for Omarchy. Rectangles, circles, triangles, rhombuses, post-its, lines, and text, each of which can be turned; connections that stay attached while you move things around; as many boards as you like, each saved on its own as you work.
 
 Everything stays on this machine, in `~/.local/share/slate/boards`, one JSON file per board.
 
@@ -10,14 +10,14 @@ Everything stays on this machine, in `~/.local/share/slate/boards`, one JSON fil
 
 Press a key, drag, done. Drawing a shape drops you back into selecting, so the next thing you do is move it or write on it.
 
-- **Draw**: `R`, `O`, `T`, or `L`, then drag; the same four are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
+- **Draw**: `R`, `O`, `T`, `D`, or `L`, then drag; the same five are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
 - **Frames**: `F`, or the shapes menu, and drag to draw a frame: a named area that holds what lies inside it. Move the frame, by its name or once it is selected, and everything in it moves along; delete or copy it and its contents go too. Double-click the name to rename it. A drag inside a frame that isn't selected draws a selection band, and a click there selects the frame.
 - **Icons**: `I` opens a menu of icons (star, check, warning, idea, person, clock and more); pick one and click or drag on the canvas. Icons move, size, turn, color, and connect like any other shape.
 - **Post-its**: `P` and a click sticks one under the pointer, ready to type on.
 - **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
 - **Turn**: hold `Alt` and drag any handle of the selected shape to rotate it. It catches on every 45° and on the angle of any other shape, and shows the angle beside the pointer. Shift turns in steps of 15°, `Ctrl` turns freely, and `,` and `.` turn from the keyboard.
 - **Snap**: a shape you drag catches on the sides and middles of the shapes it passes, and so does a side or corner you resize, with a guide line showing what it lined up with. Hold `Ctrl` to place or size it freely.
-- **Border style**: the button beside the colors makes the outline of the selected rectangles, circles, triangles, frames, lines, and connections solid, dashed, or dotted; `S` steps through the three. New shapes take the style last picked.
+- **Border style**: the button beside the colors makes the outline of the selected rectangles, circles, triangles, rhombuses, frames, lines, and connections solid, dashed, or dotted; `S` steps through the three. New shapes take the style last picked.
 - **Arrange**: select several shapes and press `Alt` with an arrow to line them up on that side; with three or more, `Alt+Shift+H` and `Alt+Shift+V` space them evenly between the outermost two, across or up and down; `]` and `[` bring the selection to the front or send it to the back. The toolbar's arrange menu has the same.
 - **Group**: `Ctrl+G`, or the arrange menu, makes one group of the selected shapes: a click on any of them selects them all, so they move, resize, line up, and go to the front or back as one, and a copy is a group of its own. `Ctrl+Shift+G` takes the group apart. Grouping groups makes one group of them all.
 - **Write**: double-click a shape to label it, or empty canvas for free text. Enter finishes, Shift+Enter starts a new line.
@@ -27,7 +27,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 
 | Key | Action |
 | --- | --- |
-| `R` `O` `T` `L` | Draw a rectangle, circle, triangle, or line |
+| `R` `O` `T` `D` `L` | Draw a rectangle, circle, triangle, rhombus, or line |
 | `F` | Draw a frame |
 | `P` | Stick a post-it |
 | `I` | Place an icon |

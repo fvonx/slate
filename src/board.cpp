@@ -19,7 +19,7 @@ const double edgeGap = 5;
 const int undoLimit = 200;
 
 const QStringList &kinds() {
-    static const QStringList kinds{"rect", "ellipse", "triangle", "postit", "icon", "frame", "text", "line", "connector"};
+    static const QStringList kinds{"rect", "ellipse", "triangle", "rhombus", "postit", "icon", "frame", "text", "line", "connector"};
     return kinds;
 }
 
@@ -162,6 +162,12 @@ QVector<QPointF> triangle(const BoardItem &item) {
     return {{item.x + item.w / 2, item.y}, {item.x + item.w, item.y + item.h}, {item.x, item.y + item.h}};
 }
 
+// A rhombus's corners are the middles of its box's sides.
+QVector<QPointF> rhombus(const BoardItem &item) {
+    return {{item.x + item.w / 2, item.y}, {item.x + item.w, item.y + item.h / 2},
+            {item.x + item.w / 2, item.y + item.h}, {item.x, item.y + item.h / 2}};
+}
+
 // Where connectors aim: the middle, which for a triangle is its centroid.
 QPointF anchor(const BoardItem &item) {
     if (item.kind == QLatin1String("triangle"))
@@ -219,6 +225,8 @@ QPointF edge(const BoardItem &item, const QPointF &worldToward) {
                 best = along;
         }
         t = best < 0 ? 0 : best;
+    } else if (item.kind == QLatin1String("rhombus")) {
+        t = 1 / (std::abs(d.x()) / hw + std::abs(d.y()) / hh);
     } else {
         t = 1 / std::max(std::abs(d.x()) / hw, std::abs(d.y()) / hh);
     }
@@ -1150,6 +1158,10 @@ int Board::itemAt(double x, double y, double tolerance) const {
                 const double a = cross(v[1] - v[0], p - v[0]), b = cross(v[2] - v[1], p - v[1]),
                              c = cross(v[0] - v[2], p - v[2]);
                 hit = (a >= 0 && b >= 0 && c >= 0) || (a <= 0 && b <= 0 && c <= 0);
+            } else if (item.kind == QLatin1String("rhombus")) {
+                const double hw = item.w / 2 + tolerance, hh = item.h / 2 + tolerance;
+                const QPointF d = p - anchor(item);
+                hit = hw > 0 && hh > 0 && std::abs(d.x()) / hw + std::abs(d.y()) / hh <= 1;
             } else {
                 hit = QRectF(item.x, item.y, item.w, item.h).adjusted(-tolerance, -tolerance, tolerance, tolerance).contains(p);
             }
@@ -1364,7 +1376,8 @@ QVariantList Board::otherRotations() const {
 // the shape has them before it is turned), or nothing when the point is not
 // within reach of the outline. A drag from there resizes the shape that way.
 // A circle's outline is split where its diagonals cross it; a triangle has a
-// bottom and two slanted sides, and no top.
+// bottom and two slanted sides, and no top. A rhombus has only slanted
+// sides, each split in the middle between the two corners it joins.
 QString Board::outlineSide(int id, double x, double y, double reach) const {
     const BoardItem *item = find(id);
     if (!item || !item->isShape() || item->kind == QLatin1String("text"))
@@ -1391,6 +1404,16 @@ QString Board::outlineSide(int id, double x, double y, double reach) const {
         if (distanceToSegment(p, {v[2], v[0]}) <= reach)
             return "l";
         return {};
+    }
+    if (item->kind == QLatin1String("rhombus")) {
+        const auto v = rhombus(*item);
+        bool near = false;
+        for (int i = 0; i < 4 && !near; ++i)
+            near = distanceToSegment(p, {v[i], v[(i + 1) % 4]}) <= reach;
+        if (!near || item->w <= 0 || item->h <= 0)
+            return {};
+        const double dx = (p.x() - left) / item->w - 0.5, dy = (p.y() - top) / item->h - 0.5;
+        return std::abs(dx) >= std::abs(dy) ? (dx < 0 ? "l" : "r") : (dy < 0 ? "t" : "b");
     }
     const bool alongX = p.x() >= left - reach && p.x() <= right + reach;
     const bool alongY = p.y() >= top - reach && p.y() <= bottom + reach;

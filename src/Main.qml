@@ -31,6 +31,7 @@ ApplicationWindow {
         { tool: "rect", key: "R", label: qsTr("Rectangle"), icon: "M3 4.5 H17 V15.5 H3 Z" },
         { tool: "ellipse", key: "O", label: qsTr("Circle"), icon: "M10 3 A7 7 0 1 0 10 17 A7 7 0 1 0 10 3 Z" },
         { tool: "triangle", key: "T", label: qsTr("Triangle"), icon: "M10 3 L17.5 16.5 H2.5 Z" },
+        { tool: "rhombus", key: "D", label: qsTr("Rhombus"), icon: "M10 2.5 L17.5 10 L10 17.5 L2.5 10 Z" },
         { tool: "line", key: "L", label: qsTr("Line"), icon: "M3 17 L17 3" },
         { tool: "frame", key: "F", label: qsTr("Frame"), icon: "M6 2 V18 M14 2 V18 M2 6 H18 M2 14 H18" }
     ]
@@ -144,6 +145,7 @@ ApplicationWindow {
     Shortcut { sequence: "O"; enabled: win.keys; onActivated: view.tool = "ellipse" }
     // T is the triangle, and pressed again, text.
     Shortcut { sequence: "T"; enabled: win.keys; onActivated: view.tool = view.tool === "triangle" ? "text" : "triangle" }
+    Shortcut { sequence: "D"; enabled: win.keys; onActivated: view.tool = "rhombus" }
     Shortcut { sequence: "X"; enabled: win.keys; onActivated: view.tool = "text" }
     Shortcut { sequence: "L"; enabled: win.keys; onActivated: view.tool = "line" }
     Shortcut { sequence: "F"; enabled: win.keys; onActivated: view.tool = "frame" }
@@ -1396,7 +1398,7 @@ ApplicationWindow {
         objectName: "help"
         Overlay.modal: Rectangle { color: Qt.alpha("black", 0.45) }
         readonly property var entries: [
-            { keys: "R  O  T  L", action: qsTr("Draw a rectangle, circle, triangle or line") },
+            { keys: "R  O  T  D  L", action: qsTr("Draw a rectangle, circle, triangle, rhombus or line") },
             { keys: "F", action: qsTr("Draw a frame; what lies inside it moves with it") },
             { keys: "P", action: qsTr("Stick a post-it") },
             { keys: "I", action: qsTr("Place an icon") },

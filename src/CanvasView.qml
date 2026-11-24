@@ -893,7 +893,7 @@ Item {
         } else if (was === "draw") {
             // A click drops the shape at a comfortable size around the pointer.
             if (!drawId && tool !== "line") {
-                const w = tool === "rect" ? 160 : tool === "postit" ? 150 : tool === "icon" ? 64
+                const w = tool === "rect" || tool === "rhombus" ? 160 : tool === "postit" ? 150 : tool === "icon" ? 64
                         : tool === "frame" ? 480 : 120
                 const h = tool === "rect" ? 100 : tool === "triangle" ? 110 : tool === "postit" ? 150
                         : tool === "icon" ? 64 : tool === "frame" ? 320 : 120
@@ -1155,6 +1155,37 @@ Item {
                 }
 
                 DelegateChoice {
+                    roleValue: "rhombus"
+                    Body {
+                        id: rhombusBody
+                        zoom: view.zoom
+                        editingId: view.editingId
+                        // The words keep to the wide middle of the rhombus.
+                        labelWidth: width / 2
+                        Shape {
+                            anchors.fill: parent
+                            z: -1
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: rhombusBody.ink
+                                strokeWidth: 2
+                                fillColor: rhombusBody.paint
+                                strokeStyle: rhombusBody.strokeStyle ? ShapePath.DashLine : ShapePath.SolidLine
+                                dashPattern: view.dashesOf(rhombusBody.strokeStyle)
+                                capStyle: rhombusBody.strokeStyle === "dotted" ? ShapePath.RoundCap : ShapePath.FlatCap
+                                joinStyle: ShapePath.RoundJoin
+                                startX: rhombusBody.width / 2
+                                startY: 1
+                                PathLine { x: rhombusBody.width - 1; y: rhombusBody.height / 2 }
+                                PathLine { x: rhombusBody.width / 2; y: rhombusBody.height - 1 }
+                                PathLine { x: 1; y: rhombusBody.height / 2 }
+                                PathLine { x: rhombusBody.width / 2; y: 1 }
+                            }
+                        }
+                    }
+                }
+
+                DelegateChoice {
                     roleValue: "icon"
                     Body {
                         id: iconBody
@@ -1292,7 +1323,8 @@ Item {
             // the same size at any zoom.
             readonly property bool name: view.editingKind === "frame"
             readonly property bool free: note || name
-            readonly property real room: triangle ? view.editBox.width / 2 : view.editBox.width - 16
+            readonly property real room: triangle || view.editingKind === "rhombus" ? view.editBox.width / 2
+                                                                                    : view.editBox.width - 16
             transformOrigin: Item.TopLeft
             scale: name ? 1 / view.zoom : 1
             x: free ? view.editBox.x : view.editBox.x + (view.editBox.width - room) / 2

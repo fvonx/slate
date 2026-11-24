@@ -191,6 +191,38 @@ private slots:
         QCOMPARE(board.itemAt(450, 80, 0), triangle);
         QCOMPARE(board.itemAt(405, 10, 0), 0);
 
+        // A rhombus reaches its box only at the middle of each side: all
+        // four corners of the box are outside it.
+        const int rhombus = board.add("rhombus", 600, 0, 100, 60);
+        QCOMPARE(board.itemAt(650, 30, 0), rhombus);
+        QCOMPARE(board.itemAt(650, 2, 0), rhombus);
+        QCOMPARE(board.itemAt(698, 30, 0), rhombus);
+        for (const QPointF &corner : {QPointF(605, 5), QPointF(695, 5), QPointF(605, 55), QPointF(695, 55)})
+            QCOMPARE(board.itemAt(corner.x(), corner.y(), 0), 0);
+        // A connector meets its slanted side, not the corner of its box: on
+        // the way to the upper right, halfway along that side.
+        const QPointF met = board.edgePoint(rhombus, 650 + 500, 30 - 300);
+        QVERIFY(std::abs(met.x() - 675) < 6 && std::abs(met.y() - 15) < 6);
+        QVERIFY(met.x() > 675 && met.y() < 15);
+        // Its outline is taken hold of by the side nearest: the slanted
+        // sides near the left and right corners size its width, those near
+        // the top and bottom its height; the middle is for moving it.
+        QCOMPARE(board.outlineSide(rhombus, 605, 27, 4), QString("l"));
+        QCOMPARE(board.outlineSide(rhombus, 695, 33, 4), QString("r"));
+        QCOMPARE(board.outlineSide(rhombus, 655, 3, 4), QString("t"));
+        QCOMPARE(board.outlineSide(rhombus, 645, 57, 4), QString("b"));
+        QCOMPARE(board.outlineSide(rhombus, 650, 30, 4), QString());
+        QCOMPARE(board.outlineSide(rhombus, 603, 3, 4), QString());
+        // It is saved and opened as what it is, and its outline can be styled.
+        board.selectOnly(rhombus);
+        board.setSelectionStroke("dashed");
+        Board again;
+        again.load(board.toJson());
+        QCOMPARE(again.find(rhombus)->kind, QString("rhombus"));
+        QCOMPARE(again.find(rhombus)->stroke, QString("dashed"));
+        board.removeItem(rhombus);
+        board.setSelectionStroke("");
+
         const int line = board.add("line", 0, 200, 100, 0);
         QCOMPARE(board.itemAt(50, 203, 2), line);
         QCOMPARE(board.itemAt(50, 230, 2), 0);
@@ -1129,6 +1161,7 @@ private slots:
         board->setRotation(note, 12);
         board->add("ellipse", 0, 300, 120, 120);
         board->add("triangle", 300, 300, 120, 110);
+        board->setText(board->add("rhombus", 500, 450, 160, 100), "Decide");
         board->add("line", 0, 500, 200, 40);
         const int words = board->add("text", 300, 500, 90, 30);
         board->setText(words, "Loose words");
@@ -2033,6 +2066,11 @@ private slots:
         QTRY_VERIFY(!shapeMenu->property("visible").toBool());
         QCOMPARE(window->property("lastShape").toString(), QString("triangle"));
         QVERIFY(shapesButton->property("active").toBool());
+        // The rhombus is in the menu too, and on D.
+        QVERIFY(visualChild(shapeMenu->property("contentItem").value<QQuickItem *>(), "shape-rhombus"));
+        QTest::keyClick(window, Qt::Key_D);
+        QCOMPARE(view->property("tool").toString(), QString("rhombus"));
+        QCOMPARE(window->property("lastShape").toString(), QString("rhombus"));
         QTest::keyClick(window, Qt::Key_O);
         QCOMPARE(window->property("lastShape").toString(), QString("ellipse"));
         QTest::keyClick(window, Qt::Key_Escape);

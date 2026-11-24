@@ -73,7 +73,9 @@ void paintLabel(QPainter &painter, const BoardItem &item, const QColor &color) {
     // Centered in the shape and wrapped to its width; in a triangle, in the
     // wide part below the middle.
     const bool triangle = item.kind == QLatin1String("triangle");
-    const double width = std::max(0.0, triangle ? item.w / 2 : item.w - 16);
+    // A rhombus is half as wide halfway to its top as it is in the middle.
+    const bool narrow = triangle || item.kind == QLatin1String("rhombus");
+    const double width = std::max(0.0, narrow ? item.w / 2 : item.w - 16);
     const QPointF middle(item.x + item.w / 2, item.y + item.h / 2 + (triangle ? item.h / 6 : 0));
     painter.setFont(fontOf(18));
     painter.setPen(color);
@@ -128,6 +130,9 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
             painter.drawEllipse(inner);
         } else if (item.kind == QLatin1String("triangle")) {
             painter.drawPolygon(QPolygonF{{box.center().x(), inner.top()}, inner.bottomRight(), inner.bottomLeft()});
+        } else if (item.kind == QLatin1String("rhombus")) {
+            painter.drawPolygon(QPolygonF{{box.center().x(), inner.top()}, {inner.right(), box.center().y()},
+                                          {box.center().x(), inner.bottom()}, {inner.left(), box.center().y()}});
         } else {
             const double corner = std::max(0.0, std::min({double(look.radius), item.w / 2, item.h / 2}) - 1);
             painter.drawRoundedRect(inner, corner, corner);
