@@ -67,6 +67,37 @@ ApplicationWindow {
 
     function paint(index) { board.setSelectionColor(swatches[index]) }
 
+    // How an outline can be drawn. S steps through them.
+    readonly property var strokes: [
+        { style: "", label: qsTr("Solid") },
+        { style: "dashed", label: qsTr("Dashed") },
+        { style: "dotted", label: qsTr("Dotted") }
+    ]
+    function nextStroke() {
+        const at = strokes.findIndex(s => s.style === board.shownStroke)
+        board.setSelectionStroke(strokes[(at + 1) % strokes.length].style)
+    }
+
+    // A short line drawn the way an outline of that style is.
+    component StrokeSample: Shape {
+        id: sample
+        property string style: ""
+        property real thickness: 2
+        height: thickness
+        preferredRendererType: Shape.CurveRenderer
+        ShapePath {
+            strokeColor: theme.foreground
+            strokeWidth: sample.thickness
+            fillColor: "transparent"
+            strokeStyle: sample.style ? ShapePath.DashLine : ShapePath.SolidLine
+            dashPattern: sample.style === "dashed" ? [4, 3] : [0.1, 2.5]
+            capStyle: sample.style === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
+            startX: sample.thickness / 2
+            startY: sample.thickness / 2
+            PathLine { x: sample.width - sample.thickness / 2; y: sample.thickness / 2 }
+        }
+    }
+
     // Saves the board in Downloads, drawn as it is here, and says where.
     property string notice: ""
     property bool noticeFailed: false
@@ -105,9 +136,10 @@ ApplicationWindow {
     Shortcut { sequence: ","; enabled: win.keys; onActivated: board.rotateSelection(-15) }
     Shortcut { sequence: "."; enabled: win.keys; onActivated: board.rotateSelection(15) }
     Shortcut { sequence: "C"; enabled: win.keys; onActivated: view.tool = "connect" }
+    Shortcut { sequence: "S"; enabled: win.keys; onActivated: win.nextStroke() }
     Shortcut {
         sequence: "Escape"
-        enabled: win.keys && !colorMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible && !iconMenu.visible
+        enabled: win.keys && !colorMenu.visible && !strokeMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible && !iconMenu.visible
         onActivated: {
             if (view.tool !== "select")
                 view.tool = "select"
@@ -611,6 +643,116 @@ ApplicationWindow {
                                         onTapped: {
                                             win.paint(swatch.index)
                                             colorMenu.close()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Whether an outline is solid, dashed, or dotted.
+                Rectangle {
+                    id: strokeButton
+                    objectName: "strokeButton"
+                    Layout.preferredWidth: 42
+                    Layout.preferredHeight: 42
+                    radius: Math.min(4, theme.radius)
+                    color: strokeMenu.visible || strokeHover.hovered ? theme.colors.selection : "transparent"
+
+                    // The style of what is selected, or of what is drawn
+                    // next; a selection of several styles shows them all.
+                    Column {
+                        anchors.centerIn: parent
+                        anchors.horizontalCenterOffset: -4
+                        spacing: 3
+                        readonly property bool mixed: board.shownStroke === "mixed"
+                        Repeater {
+                            model: parent.mixed ? ["", "dashed", "dotted"] : [board.shownStroke]
+                            StrokeSample {
+                                required property string modelData
+                                width: 20
+                                style: modelData
+                            }
+                        }
+                    }
+                    Shape {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.rightMargin: 4
+                        width: 8
+                        height: 6
+                        preferredRendererType: Shape.CurveRenderer
+                        ShapePath {
+                            strokeColor: theme.foreground
+                            strokeWidth: 1.4
+                            fillColor: "transparent"
+                            capStyle: ShapePath.RoundCap
+                            joinStyle: ShapePath.RoundJoin
+                            PathSvg { path: "M1 4.5 L4 1.5 L7 4.5" }
+                        }
+                    }
+                    HoverHandler { id: strokeHover }
+                    TapHandler { onTapped: strokeMenu.visible ? strokeMenu.close() : strokeMenu.open() }
+                    ToolTip.visible: strokeHover.hovered && !strokeMenu.visible
+                    ToolTip.delay: 500
+                    ToolTip.text: qsTr("Border style")
+
+                    Popup {
+                        id: strokeMenu
+                        objectName: "strokeMenu"
+                        x: (parent.width - width) / 2
+                        y: -height - 14
+                        padding: 8
+                        focus: true
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        background: Rectangle {
+                            color: win.panel
+                            border.color: theme.colors.selection
+                            radius: theme.radius
+                        }
+
+                        ColumnLayout {
+                            spacing: 2
+                            // A popup is not an Item and doesn't inherit the
+                            // window's mirroring, so its content opts in.
+                            LayoutMirroring.enabled: win.rightToLeft
+                            LayoutMirroring.childrenInherit: true
+
+                            Repeater {
+                                model: win.strokes
+                                delegate: Rectangle {
+                                    id: strokeRow
+                                    required property var modelData
+                                    readonly property bool current: board.shownStroke === modelData.style
+                                    objectName: "stroke-" + (modelData.style || "solid")
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: strokeRowContent.implicitWidth + 22
+                                    Layout.preferredHeight: 32
+                                    radius: Math.min(4, theme.radius)
+                                    color: current || strokeRowHover.hovered ? theme.colors.selection : "transparent"
+
+                                    RowLayout {
+                                        id: strokeRowContent
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 10
+                                        anchors.rightMargin: 12
+                                        spacing: 12
+                                        StrokeSample {
+                                            Layout.preferredWidth: 30
+                                            Layout.alignment: Qt.AlignVCenter
+                                            style: strokeRow.modelData.style
+                                        }
+                                        Label {
+                                            Layout.fillWidth: true
+                                            text: strokeRow.modelData.label
+                                        }
+                                    }
+                                    HoverHandler { id: strokeRowHover }
+                                    TapHandler {
+                                        onTapped: {
+                                            board.setSelectionStroke(strokeRow.modelData.style)
+                                            strokeMenu.close()
                                         }
                                     }
                                 }
@@ -1133,6 +1275,7 @@ ApplicationWindow {
             { keys: "V · Esc", action: qsTr("Select and move") },
             { keys: "Enter", action: qsTr("Write on the selected shape") },
             { keys: "1 – 8", action: qsTr("Color the selection") },
+            { keys: "S", action: qsTr("Make the border solid, dashed or dotted") },
             { keys: "Alt", action: qsTr("Hold and drag a handle to rotate the shape") },
             { keys: "Shift", action: qsTr("Hold while drawing a line to keep it straight") },
             { keys: "Shift", action: qsTr("Hold while resizing to keep the shape's proportions") },

@@ -19,6 +19,7 @@ struct BoardItem {
     double x = 0, y = 0, w = 0, h = 0;
     QString text;
     QString color; // a theme palette key, or empty for the foreground
+    QString stroke; // how the outline is drawn: empty for solid, dashed, or dotted
     QString icon; // which icon, for an icon
     int fontSize = 24;
     double rotation = 0; // degrees, about the middle of its box
@@ -28,9 +29,15 @@ struct BoardItem {
     bool isLine() const { return kind == QLatin1String("line"); }
     bool isShape() const { return !isConnector() && !isLine(); }
     bool isFrame() const { return kind == QLatin1String("frame"); }
+    // The outlines that can be dashed or dotted: the drawn shapes, the frame,
+    // and the line.
+    bool takesStroke() const {
+        return kind == QLatin1String("rect") || kind == QLatin1String("ellipse") || kind == QLatin1String("triangle")
+            || isFrame() || isLine();
+    }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
-            && color == o.color && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
+            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to;
     }
 };
 
@@ -52,6 +59,7 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(int groupCount READ groupCount NOTIFY selectionChanged)
     Q_PROPERTY(QRectF groupBounds READ movableBounds NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
+    Q_PROPERTY(QString shownStroke READ shownStroke NOTIFY shownStrokeChanged)
     Q_PROPERTY(bool canUndo READ canUndo NOTIFY undoChanged)
     Q_PROPERTY(bool canRedo READ canRedo NOTIFY undoChanged)
     Q_PROPERTY(bool hasView READ hasView NOTIFY loaded)
@@ -62,7 +70,7 @@ class Board : public QAbstractListModel {
 public:
     enum Role {
         IdRole = Qt::UserRole + 1, KindRole, XRole, YRole, WRole, HRole, LabelRole, FillRole, FontSizeRole,
-        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole
+        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole, StrokeRole
     };
 
     explicit Board(QObject *parent = nullptr);
@@ -90,6 +98,9 @@ public:
     // The color the color menu marks: that of what is selected, when it all
     // has one ("mixed" when it doesn't), or the one new shapes will take.
     QString shownColor() const;
+    // The same for the outline's style: solid (empty), dashed, dotted, or
+    // "mixed". Only what has an outline to style counts.
+    QString shownStroke() const;
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
     bool hasView() const { return m_hasView; }
@@ -128,6 +139,9 @@ public:
     Q_INVOKABLE void sendToBack();
     Q_INVOKABLE void setMeasuredSize(int id, double w, double h);
     Q_INVOKABLE void setSelectionColor(const QString &color);
+    // Solid (empty), dashed, or dotted, for the selection and for what is
+    // drawn next.
+    Q_INVOKABLE void setSelectionStroke(const QString &stroke);
     Q_INVOKABLE void removeSelection();
     Q_INVOKABLE void removeItem(int id);
 
@@ -173,6 +187,7 @@ signals:
     void selectionGeometryChanged();
     void colorChanged();
     void shownColorChanged();
+    void shownStrokeChanged();
     void undoChanged();
     // A board was opened: the window takes its saved view.
     void loaded();
@@ -209,6 +224,7 @@ private:
     QSet<int> m_selected;
     int m_nextId = 1;
     QString m_color;
+    QString m_stroke;
     QVector<Snapshot> m_undo, m_redo;
     bool m_hasView = false;
     double m_viewX = 0, m_viewY = 0, m_viewZoom = 1;

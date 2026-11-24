@@ -28,6 +28,12 @@ const QStringList &palette() {
     return palette;
 }
 
+// How an outline can be drawn, besides solid.
+const QStringList &strokes() {
+    static const QStringList strokes{"dashed", "dotted"};
+    return strokes;
+}
+
 QJsonObject itemToJson(const BoardItem &item) {
     QJsonObject o{{"id", item.id}, {"kind", item.kind}};
     if (item.isConnector()) {
@@ -43,6 +49,8 @@ QJsonObject itemToJson(const BoardItem &item) {
         o["text"] = item.text;
     if (!item.color.isEmpty())
         o["color"] = item.color;
+    if (!item.stroke.isEmpty())
+        o["stroke"] = item.stroke;
     if (item.kind == QLatin1String("text"))
         o["fontSize"] = item.fontSize;
     if (item.kind == QLatin1String("icon"))
@@ -82,6 +90,9 @@ BoardItem itemFromJson(const QJsonObject &o) {
     if (!palette().contains(item.color))
         item.color.clear();
     item.color = colorFor(item.kind, item.color);
+    item.stroke = o.value("stroke").toString();
+    if (!item.takesStroke() || !strokes().contains(item.stroke))
+        item.stroke.clear();
     // An icon this Slate doesn't know is shown as a question.
     if (item.kind == QLatin1String("icon")) {
         item.icon = o.value("icon").toString();
@@ -219,7 +230,25 @@ Board::Board(QObject *parent) : QAbstractListModel(parent) {
                      [this](const QModelIndex &, const QModelIndex &, const QList<int> &roles) {
                          if (roles.isEmpty() || roles.contains(FillRole))
                              emit shownColorChanged();
+                         if (roles.isEmpty() || roles.contains(StrokeRole))
+                             emit shownStrokeChanged();
                      });
+    QObject::connect(this, &Board::selectionChanged, this, &Board::shownStrokeChanged);
+    QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::shownStrokeChanged);
+}
+
+QString Board::shownStroke() const {
+    QString shown;
+    bool any = false;
+    for (const BoardItem &item : m_items) {
+        if (!m_selected.contains(item.id) || !item.takesStroke())
+            continue;
+        if (any && item.stroke != shown)
+            return QStringLiteral("mixed");
+        shown = item.stroke;
+        any = true;
+    }
+    return any ? shown : m_stroke;
 }
 
 QString Board::shownColor() const {
@@ -243,7 +272,8 @@ int Board::rowCount(const QModelIndex &parent) const {
 QHash<int, QByteArray> Board::roleNames() const {
     return {{IdRole, "itemId"}, {KindRole, "kind"}, {XRole, "ix"}, {YRole, "iy"}, {WRole, "iw"}, {HRole, "ih"},
             {LabelRole, "label"}, {FillRole, "fill"}, {FontSizeRole, "fontSize"}, {SelectedRole, "selected"},
-            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"}};
+            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"},
+            {StrokeRole, "strokeStyle"}};
 }
 
 QVariant Board::data(const QModelIndex &index, int role) const {
@@ -267,6 +297,7 @@ QVariant Board::data(const QModelIndex &index, int role) const {
     case Y2Role: return line(item).y2();
     case RotationRole: return item.rotation;
     case IconRole: return item.icon;
+    case StrokeRole: return item.stroke;
     }
     return {};
 }
@@ -379,6 +410,8 @@ int Board::add(const QString &kind, double x, double y, double w, double h) {
     item.w = w;
     item.h = h;
     item.color = colorFor(kind, m_color);
+    if (item.takesStroke())
+        item.stroke = m_stroke;
     if (kind == QLatin1String("icon"))
         item.icon = QStringLiteral("star");
     if (kind == QLatin1String("frame")) {
@@ -787,6 +820,28 @@ void Board::setSelectionColor(const QString &color) {
     emit changed();
 }
 
+void Board::setSelectionStroke(const QString &stroke) {
+    const QString style = strokes().contains(stroke) ? stroke : QString();
+    if (style != m_stroke) {
+        m_stroke = style;
+        emit shownStrokeChanged();
+    }
+    bool any = false;
+    for (const BoardItem &item : m_items)
+        any = any || (m_selected.contains(item.id) && item.takesStroke() && item.stroke != style);
+    if (!any)
+        return;
+    checkpoint();
+    for (int i = 0; i < m_items.size(); ++i) {
+        BoardItem &item = m_items[i];
+        if (!m_selected.contains(item.id) || !item.takesStroke() || item.stroke == style)
+            continue;
+        item.stroke = style;
+        emit dataChanged(index(i), index(i), {StrokeRole});
+    }
+    emit changed();
+}
+
 void Board::removeIds(QSet<int> ids) {
     // A connector goes with either of its shapes.
     for (const BoardItem &item : m_items)
@@ -1158,7 +1213,8 @@ QVariantMap Board::item(int id) const {
     if (!item)
         return {};
     return {{"id", item->id}, {"kind", item->kind}, {"x", item->x}, {"y", item->y}, {"w", item->w},
-            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"fontSize", item->fontSize},
+            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke},
+            {"fontSize", item->fontSize},
             {"rotation", item->rotation}, {"icon", item->icon}};
 }
 

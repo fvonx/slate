@@ -87,6 +87,10 @@ Item {
     function insertPoint() { return toWorld(pointerInside ? pointer : Qt.point(width / 2, height / 2)) }
     function focusPoint() { return pointerInside ? pointer : Qt.point(width / 2, height / 2) }
 
+    // How a dashed or a dotted outline is broken up, in widths of the line. A
+    // dot is a dash too short to see, with round ends.
+    function dashesOf(style) { return style === "dashed" ? [4, 3] : [0.1, 2.5] }
+
     function inkOf(key) { return key ? theme.colors[key] : theme.foreground }
 
     // A post-it is yellow until it is given another color, and its words are
@@ -1002,8 +1006,31 @@ Item {
                             z: -1
                             color: rectBody.paint
                             border.color: rectBody.ink
-                            border.width: 2
+                            // A Rectangle's border is always solid; a dashed
+                            // or dotted one is drawn over it.
+                            border.width: rectBody.strokeStyle ? 0 : 2
                             radius: Math.min(theme.radius, width / 2, height / 2)
+                        }
+                        Shape {
+                            anchors.fill: parent
+                            z: -1
+                            visible: rectBody.strokeStyle !== ""
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: rectBody.ink
+                                strokeWidth: 2
+                                fillColor: "transparent"
+                                strokeStyle: ShapePath.DashLine
+                                dashPattern: view.dashesOf(rectBody.strokeStyle)
+                                capStyle: rectBody.strokeStyle === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
+                                PathRectangle {
+                                    x: 1
+                                    y: 1
+                                    width: Math.max(0, rectBody.width - 2)
+                                    height: Math.max(0, rectBody.height - 2)
+                                    radius: Math.max(0, Math.min(theme.radius, rectBody.width / 2, rectBody.height / 2) - 1)
+                                }
+                            }
                         }
                     }
                 }
@@ -1023,8 +1050,30 @@ Item {
                             z: -1
                             color: Qt.tint(theme.background, Qt.alpha(frameBody.ink, frameBody.fill ? 0.16 : 0.035))
                             border.color: Qt.alpha(frameBody.ink, frameBody.fill ? 0.8 : 0.3)
-                            border.width: 1.5
+                            border.width: frameBody.strokeStyle ? 0 : 1.5
                             radius: Math.min(theme.radius, width / 2, height / 2)
+                        }
+                        // Dashed or dotted, as on a rectangle.
+                        Shape {
+                            anchors.fill: parent
+                            z: -1
+                            visible: frameBody.strokeStyle !== ""
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: Qt.alpha(frameBody.ink, frameBody.fill ? 0.8 : 0.3)
+                                strokeWidth: 1.5
+                                fillColor: "transparent"
+                                strokeStyle: ShapePath.DashLine
+                                dashPattern: view.dashesOf(frameBody.strokeStyle)
+                                capStyle: frameBody.strokeStyle === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
+                                PathRectangle {
+                                    x: 0.75
+                                    y: 0.75
+                                    width: Math.max(0, frameBody.width - 1.5)
+                                    height: Math.max(0, frameBody.height - 1.5)
+                                    radius: Math.max(0, Math.min(theme.radius, frameBody.width / 2, frameBody.height / 2) - 0.75)
+                                }
+                            }
                         }
                         // The name, above the top left corner, the same size at
                         // any zoom and cut short at the frame's width.
@@ -1057,6 +1106,9 @@ Item {
                                 strokeColor: ellipseBody.ink
                                 strokeWidth: 2
                                 fillColor: ellipseBody.paint
+                                strokeStyle: ellipseBody.strokeStyle ? ShapePath.DashLine : ShapePath.SolidLine
+                                dashPattern: view.dashesOf(ellipseBody.strokeStyle)
+                                capStyle: ellipseBody.strokeStyle === "dotted" ? ShapePath.RoundCap : ShapePath.FlatCap
                                 PathAngleArc {
                                     centerX: ellipseBody.width / 2
                                     centerY: ellipseBody.height / 2
@@ -1087,6 +1139,9 @@ Item {
                                 strokeColor: triangleBody.ink
                                 strokeWidth: 2
                                 fillColor: triangleBody.paint
+                                strokeStyle: triangleBody.strokeStyle ? ShapePath.DashLine : ShapePath.SolidLine
+                                dashPattern: view.dashesOf(triangleBody.strokeStyle)
+                                capStyle: triangleBody.strokeStyle === "dotted" ? ShapePath.RoundCap : ShapePath.FlatCap
                                 joinStyle: ShapePath.RoundJoin
                                 startX: triangleBody.width / 2
                                 startY: 1
@@ -1503,6 +1558,7 @@ Item {
         required property string fill
         required property bool selected
         required property real rot
+        required property string strokeStyle
         property real zoom: 1
         property int editingId: 0
         property color labelColor: theme.foreground
@@ -1562,6 +1618,7 @@ Item {
         required property real y2
         required property string fill
         required property bool selected
+        required property string strokeStyle
         property real zoom: 1
         property bool arrow: false
         readonly property real length: Math.hypot(x2 - x1, y2 - y1)
@@ -1581,12 +1638,28 @@ Item {
             color: Qt.alpha(theme.accent, 0.45)
         }
         Rectangle {
+            visible: stroke.strokeStyle === ""
             width: Math.max(0, stroke.length - (stroke.arrow ? 6 : 0))
             height: 2
             y: -1
             radius: 1
             color: stroke.ink
             antialiasing: true
+        }
+        Shape {
+            visible: stroke.strokeStyle !== ""
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: stroke.ink
+                strokeWidth: 2
+                fillColor: "transparent"
+                strokeStyle: ShapePath.DashLine
+                dashPattern: view.dashesOf(stroke.strokeStyle)
+                capStyle: stroke.strokeStyle === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
+                startX: 0
+                startY: 0
+                PathLine { x: stroke.length; y: 0 }
+            }
         }
         Shape {
             visible: stroke.arrow && stroke.length > 14

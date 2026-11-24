@@ -772,6 +772,68 @@ private slots:
         QCOMPARE(backend.board()->count(), 1);
     }
 
+    void outlinesAreSolidDashedOrDotted() {
+        Board board;
+        QSignalSpy shown(&board, &Board::shownStrokeChanged);
+        const int box = board.add("rect", 0, 0, 100, 100);
+        QCOMPARE(board.find(box)->stroke, QString());
+        board.setSelectionStroke("dashed");
+        QCOMPARE(board.find(box)->stroke, QString("dashed"));
+        QCOMPARE(board.shownStroke(), QString("dashed"));
+        QVERIFY(shown.count() > 0);
+        // It is told to the window, which draws it.
+        QCOMPARE(board.data(board.index(0), Board::StrokeRole).toString(), QString("dashed"));
+
+        // New shapes and lines take the style last picked; what has no
+        // outline to style never does.
+        const int line = board.add("line", 0, 200, 100, 0);
+        QCOMPARE(board.find(line)->stroke, QString("dashed"));
+        const int note = board.add("postit", 200, 0, 100, 100);
+        const int frame = board.add("frame", 400, 0, 100, 100);
+        const int words = board.add("text", 600, 0, 100, 30);
+        board.selectAll();
+        board.setSelectionStroke("dotted");
+        for (int id : {box, line, frame})
+            QCOMPARE(board.find(id)->stroke, QString("dotted"));
+        for (int id : {note, words})
+            QCOMPARE(board.find(id)->stroke, QString());
+
+        // Anything else is solid, and one undo takes a change back.
+        board.setSelectionStroke("wavy");
+        QCOMPARE(board.find(box)->stroke, QString());
+        board.undo();
+        QCOMPARE(board.find(box)->stroke, QString("dotted"));
+
+        // The menu marks the style of what is selected, says when there is
+        // more than one, and looks only at what has an outline to style.
+        board.selectOnly(line);
+        board.setSelectionStroke("dashed");
+        QCOMPARE(board.shownStroke(), QString("dashed"));
+        board.toggle(box);
+        QCOMPARE(board.shownStroke(), QString("mixed"));
+        board.selectOnly(box);
+        board.toggle(note);
+        QCOMPARE(board.shownStroke(), QString("dotted"));
+
+        // It is saved with the board, left out when solid, and a style this
+        // Slate doesn't know, or one on a thing that has none, opens as solid.
+        const QJsonObject saved = board.toJson();
+        Board again;
+        again.load(saved);
+        QCOMPARE(again.find(box)->stroke, QString("dotted"));
+        QCOMPARE(again.find(line)->stroke, QString("dashed"));
+        for (const auto &value : saved.value("items").toArray())
+            if (value.toObject().value("id").toInt() == note)
+                QVERIFY(!value.toObject().contains("stroke"));
+        again.load(QJsonObject{{"items", QJsonArray{
+            QJsonObject{{"id", 1}, {"kind", "rect"}, {"w", 10}, {"h", 10}, {"stroke", "wavy"}},
+            QJsonObject{{"id", 2}, {"kind", "postit"}, {"w", 10}, {"h", 10}, {"stroke", "dashed"}},
+            QJsonObject{{"id", 3}, {"kind", "ellipse"}, {"w", 10}, {"h", 10}, {"stroke", "dotted"}}}}});
+        QCOMPARE(again.find(1)->stroke, QString());
+        QCOMPARE(again.find(2)->stroke, QString());
+        QCOMPARE(again.find(3)->stroke, QString("dotted"));
+    }
+
     void aBoardIsSavedAsPdfAndSvg() {
         QTemporaryDir dir, downloads;
         Backend backend(dir.path());
@@ -820,11 +882,18 @@ private slots:
         QVERIFY(drawing.contains("Call Pat"));
         QVERIFY(drawing.contains("Loose words"));
         QVERIFY(drawing.toLower().contains("#7aa2f7"));
+        QVERIFY(!drawing.contains("stroke-dasharray"));
 
-        // A second export never writes over the first.
+        // A second export never writes over the first, and a dashed outline
+        // is dashed in the file too.
+        board->selectOnly(plan);
+        board->setSelectionStroke("dashed");
         result = save("svg");
         QCOMPARE(result.value("path").toString(), downloads.path() + "/Road-map 2.svg");
         QVERIFY(QFile::exists(downloads.path() + "/Road-map.svg"));
+        QFile dashed(result.value("path").toString());
+        QVERIFY(dashed.open(QIODevice::ReadOnly));
+        QVERIFY(dashed.readAll().contains("stroke-dasharray"));
 
         // Only what it can write, and only where it can: otherwise it says
         // so and leaves nothing behind.
@@ -1728,6 +1797,35 @@ private slots:
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!colorMenu->property("visible").toBool());
         board->removeItem(blue);
+
+        // The outline's style is behind the button beside the colors: the
+        // menu sets it and marks it, and S steps on through the styles.
+        const int outlined = board->add("rect", 2000, 2000, 50, 50);
+        board->selectOnly(outlined);
+        auto *strokeMenu = window->findChild<QObject *>("strokeMenu");
+        auto *strokeButton = window->findChild<QQuickItem *>("strokeButton");
+        QVERIFY(strokeButton->x() > colorButton->x());
+        QTest::mouseClick(window, Qt::LeftButton, {}, strokeButton->mapToScene({21, 21}).toPoint());
+        QTRY_VERIFY(strokeMenu->property("opened").toBool());
+        auto *strokeContent = strokeMenu->property("contentItem").value<QQuickItem *>();
+        QVERIFY(visualChild(strokeContent, "stroke-solid")->property("current").toBool());
+        auto *dashedRow = visualChild(strokeContent, "stroke-dashed");
+        QVERIFY(dashedRow);
+        QTest::mouseClick(window, Qt::LeftButton, {}, dashedRow->mapToScene({20, 16}).toPoint());
+        QCOMPARE(board->find(outlined)->stroke, QString("dashed"));
+        QTRY_VERIFY(!strokeMenu->property("visible").toBool());
+        QVERIFY(dashedRow->property("current").toBool());
+        QTest::keyClick(window, Qt::Key_S);
+        QCOMPARE(board->find(outlined)->stroke, QString("dotted"));
+        QTest::keyClick(window, Qt::Key_S);
+        QCOMPARE(board->find(outlined)->stroke, QString());
+        // A post-it has no outline to style, and keeps its color.
+        board->selectOnly(postit);
+        QTest::keyClick(window, Qt::Key_S);
+        QCOMPARE(board->find(postit)->stroke, QString());
+        QTest::keyClick(window, Qt::Key_S);
+        QTest::keyClick(window, Qt::Key_S);
+        board->removeItem(outlined);
         board->selectOnly(postit);
 
         // Alt and an arrow lines the selection up on that side.

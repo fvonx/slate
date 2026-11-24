@@ -17,6 +17,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 - **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
 - **Turn**: hold `Alt` and drag any handle of the selected shape to rotate it. It catches on every 45° and on the angle of any other shape, and shows the angle beside the pointer. Shift turns in steps of 15°, `Ctrl` turns freely, and `,` and `.` turn from the keyboard.
 - **Snap**: a shape you drag catches on the sides and middles of the shapes it passes, and so does a side or corner you resize, with a guide line showing what it lined up with. Hold `Ctrl` to place or size it freely.
+- **Border style**: the button beside the colors makes the outline of the selected rectangles, circles, triangles, frames, and lines solid, dashed, or dotted; `S` steps through the three. New shapes take the style last picked.
 - **Arrange**: select several shapes and press `Alt` with an arrow to line them up on that side; `]` and `[` bring the selection to the front or send it to the back. The toolbar's arrange menu has the same.
 - **Write**: double-click a shape to label it, or empty canvas for free text. Enter finishes, Shift+Enter starts a new line.
 - **Connect**: hover a shape and drag from one of the dots on its sides to another shape. Let go over empty canvas and a connected copy of the shape appears there, ready to be labelled. `C` does the same from anywhere on a shape.
@@ -34,6 +35,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | `V`, `Esc` | Select and move |
 | `Enter` | Write on the selected shape |
 | `1` – `8` | Color the selection (1 is no color); the same colors are in the toolbar menu |
+| `S` | Make the border solid, dashed, or dotted; the same styles are in the toolbar menu |
 | `,` `.` | Rotate the selection by 15° |
 | `Delete` | Delete the selection |
 | `Ctrl+C`, `Ctrl+V` | Copy and paste, under the pointer |

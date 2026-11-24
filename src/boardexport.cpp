@@ -38,12 +38,25 @@ QFont fontOf(int pixelSize) {
     return font;
 }
 
-void paintStroke(QPainter &painter, const QLineF &line, const QColor &ink, bool arrow) {
+// The pen an outline is drawn with: solid, dashed, or dotted, in the same
+// pattern the window draws. A dot is a dash too short to see, with round ends.
+QPen outlinePen(const QColor &ink, double width, const QString &stroke) {
+    QPen pen(ink, width, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    if (stroke == QLatin1String("dashed")) {
+        pen.setCapStyle(Qt::FlatCap);
+        pen.setDashPattern({4, 3});
+    } else if (stroke == QLatin1String("dotted")) {
+        pen.setDashPattern({0.1, 2.5});
+    }
+    return pen;
+}
+
+void paintStroke(QPainter &painter, const QLineF &line, const QColor &ink, bool arrow, const QString &stroke = {}) {
     const double length = line.length();
     if (length <= 0)
         return;
     const QPointF along = (line.p2() - line.p1()) / length;
-    painter.setPen(QPen(ink, 2, Qt::SolidLine, Qt::RoundCap));
+    painter.setPen(outlinePen(ink, 2, stroke));
     // An arrow's line stops inside its head, so the tip stays sharp.
     painter.drawLine(line.p1(), arrow ? line.p2() - along * 6 : line.p2());
     if (!arrow || length <= 14)
@@ -108,7 +121,7 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
         QColor outline = ink;
         if (frame)
             outline.setAlphaF(plain ? 0.3 : 0.8);
-        painter.setPen(QPen(outline, frame ? 1.5 : 2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setPen(outlinePen(outline, frame ? 1.5 : 2, item.stroke));
         painter.setBrush(tinted(look.background, ink, frame ? (plain ? 0.035 : 0.16) : plain ? 0.06 : 0.28));
         const QRectF inner = box.adjusted(1, 1, -1, -1);
         if (item.kind == QLatin1String("ellipse")) {
@@ -164,7 +177,7 @@ void paintBoard(QPainter &painter, const Board &board, const BoardLook &look) {
         if (item.isLine())
             paintStroke(painter, board.line(item),
                         item.color.isEmpty() ? look.foreground : look.colors.value(item.color, look.foreground),
-                        false);
+                        false, item.stroke);
         else
             paintShape(painter, item, look);
     }
