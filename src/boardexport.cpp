@@ -169,8 +169,13 @@ void paintBoard(QPainter &painter, const Board &board, const BoardLook &look) {
         if (item.isFrame())
             paintShape(painter, item, look);
     for (const BoardItem &item : board.items())
-        if (item.isConnector())
-            paintStroke(painter, board.line(item), look.foreground, true, item.stroke);
+        if (item.isConnector()) {
+            // An arrow at the start is the same line drawn the other way.
+            const QLineF line = board.line(item);
+            const bool back = item.arrow == QLatin1String("start");
+            paintStroke(painter, back ? QLineF(line.p2(), line.p1()) : line, look.foreground,
+                        item.arrow != QLatin1String("none"), item.stroke);
+        }
     for (const BoardItem &item : board.items()) {
         if (item.isConnector() || item.isFrame())
             continue;

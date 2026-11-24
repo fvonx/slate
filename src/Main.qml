@@ -67,6 +67,22 @@ ApplicationWindow {
 
     function paint(index) { board.setSelectionColor(swatches[index]) }
 
+    // Where a connection's arrow can be. A steps through them, and the
+    // connect button shows the one the next connection takes.
+    readonly property var connections: [
+        { arrow: "", label: qsTr("Arrow at the end"),
+          icon: "M3 10 H16.5 M12 5.5 L16.5 10 L12 14.5" },
+        { arrow: "start", label: qsTr("Arrow at the start"),
+          icon: "M3.5 10 H17 M8 5.5 L3.5 10 L8 14.5" },
+        { arrow: "none", label: qsTr("No arrow"),
+          icon: "M3 10 H17" }
+    ]
+    readonly property var shownConnection: connections.find(c => c.arrow === board.shownArrow) || connections[0]
+    function nextArrow() {
+        const at = connections.findIndex(c => c.arrow === board.shownArrow)
+        board.setSelectionArrow(connections[(at + 1) % connections.length].arrow)
+    }
+
     // How an outline can be drawn. S steps through them.
     readonly property var strokes: [
         { style: "", label: qsTr("Solid") },
@@ -137,9 +153,10 @@ ApplicationWindow {
     Shortcut { sequence: "."; enabled: win.keys; onActivated: board.rotateSelection(15) }
     Shortcut { sequence: "C"; enabled: win.keys; onActivated: view.tool = "connect" }
     Shortcut { sequence: "S"; enabled: win.keys; onActivated: win.nextStroke() }
+    Shortcut { sequence: "A"; enabled: win.keys; onActivated: win.nextArrow() }
     Shortcut {
         sequence: "Escape"
-        enabled: win.keys && !colorMenu.visible && !strokeMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible && !iconMenu.visible
+        enabled: win.keys && !colorMenu.visible && !strokeMenu.visible && !connectMenu.visible && !arrangeMenu.visible && !shapeMenu.visible && !boardMenu.visible && !iconMenu.visible
         onActivated: {
             if (view.tool !== "select")
                 view.tool = "select"
@@ -299,21 +316,23 @@ ApplicationWindow {
                           icon: "M3 3 H17 V12 L12 17 H3 Z M17 12 H12 V17" },
                         { tool: "text", key: "X", tip: qsTr("Text"),
                           icon: "M4 5.5 V3.5 H16 V5.5 M10 3.5 V16.5 M7.5 16.5 H12.5" },
-                        { tool: "connect", key: "C", tip: qsTr("Connect two shapes"),
-                          icon: "M2 3 H8 V8 H2 Z M12 12 H18 V17 H12 Z M8 5.5 H15 V12" }
+                        { tool: "connect", menu: "connect", key: "C", tip: qsTr("Connect two shapes") }
                     ]
                     delegate: Rectangle {
                         id: toolButton
                         required property var modelData
-                        // One entry stands for all the shapes, and one for all the
-                        // icons; each opens its menu and shows the one last used.
+                        // One entry stands for all the shapes, one for all the
+                        // icons, and one for every way to connect; each opens
+                        // its menu and shows the one last used.
                         readonly property string menu: modelData.menu || ""
-                        readonly property Popup popup: menu === "shapes" ? shapeMenu : menu === "icons" ? iconMenu : null
+                        readonly property Popup popup: menu === "shapes" ? shapeMenu : menu === "icons" ? iconMenu
+                                                     : menu === "connect" ? connectMenu : null
                         readonly property bool active: menu === "shapes" ? win.drawingShape
                                                      : menu === "icons" ? view.tool === "icon"
                                                      : view.tool === modelData.tool
                         readonly property string icon: menu === "shapes" ? win.shownShape.icon
                                                      : menu === "icons" ? board.iconPath(view.iconName)
+                                                     : menu === "connect" ? win.shownConnection.icon
                                                      : modelData.icon
                         // Icons are drawn on a 24 square, the toolbar's own on 20.
                         readonly property real iconBox: menu === "icons" ? 24 : 20
@@ -456,6 +475,82 @@ ApplicationWindow {
                                     onTapped: {
                                         view.tool = shapeRow.modelData.tool
                                         shapeMenu.close()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // The ways to connect; picking one changes the selected
+                // connections, or else takes up the connect tool with it.
+                Popup {
+                    id: connectMenu
+                    objectName: "connectMenu"
+                    x: parent ? (parent.width - width) / 2 : 0
+                    y: -height - 14
+                    padding: 8
+                    focus: true
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    background: Rectangle {
+                        color: win.panel
+                        border.color: theme.colors.selection
+                        radius: theme.radius
+                    }
+
+                    ColumnLayout {
+                        spacing: 2
+                        // A popup is not an Item and doesn't inherit the
+                        // window's mirroring, so its content opts in.
+                        LayoutMirroring.enabled: win.rightToLeft
+                        LayoutMirroring.childrenInherit: true
+
+                        Repeater {
+                            model: win.connections
+                            delegate: Rectangle {
+                                id: connectRow
+                                required property var modelData
+                                readonly property bool current: board.shownArrow === modelData.arrow
+                                objectName: "connect-" + (modelData.arrow || "end")
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: connectLine.implicitWidth + 20
+                                Layout.preferredHeight: 32
+                                radius: Math.min(4, theme.radius)
+                                color: current || connectRowHover.hovered ? theme.colors.selection : "transparent"
+
+                                RowLayout {
+                                    id: connectLine
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    spacing: 10
+
+                                    Shape {
+                                        Layout.preferredWidth: 20
+                                        Layout.preferredHeight: 20
+                                        preferredRendererType: Shape.CurveRenderer
+                                        ShapePath {
+                                            strokeColor: theme.foreground
+                                            strokeWidth: 1.5
+                                            fillColor: "transparent"
+                                            capStyle: ShapePath.RoundCap
+                                            joinStyle: ShapePath.RoundJoin
+                                            PathSvg { path: connectRow.modelData.icon }
+                                        }
+                                    }
+                                    Label {
+                                        Layout.fillWidth: true
+                                        text: connectRow.modelData.label
+                                    }
+                                }
+                                HoverHandler { id: connectRowHover }
+                                TapHandler {
+                                    onTapped: {
+                                        const restyles = board.connectorSelected
+                                        board.setSelectionArrow(connectRow.modelData.arrow)
+                                        if (!restyles)
+                                            view.tool = "connect"
+                                        connectMenu.close()
                                     }
                                 }
                             }
@@ -1311,6 +1406,7 @@ ApplicationWindow {
             { keys: "Enter", action: qsTr("Write on the selected shape") },
             { keys: "1 – 8", action: qsTr("Color the selection") },
             { keys: "S", action: qsTr("Make the border solid, dashed or dotted") },
+            { keys: "A", action: qsTr("Move a connection's arrow to its other end, or take it away") },
             { keys: "Alt", action: qsTr("Hold and drag a handle to rotate the shape") },
             { keys: "Shift", action: qsTr("Hold while drawing a line to keep it straight") },
             { keys: "Shift", action: qsTr("Hold while resizing to keep the shape's proportions") },

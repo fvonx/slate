@@ -35,11 +35,19 @@ const QStringList &strokes() {
     return strokes;
 }
 
+// Where a connector's arrow can be, besides the end it was drawn to.
+const QStringList &arrows() {
+    static const QStringList arrows{"start", "none"};
+    return arrows;
+}
+
 QJsonObject itemToJson(const BoardItem &item) {
     QJsonObject o{{"id", item.id}, {"kind", item.kind}};
     if (item.isConnector()) {
         o["from"] = item.from;
         o["to"] = item.to;
+        if (!item.arrow.isEmpty())
+            o["arrow"] = item.arrow;
     } else {
         o["x"] = item.x;
         o["y"] = item.y;
@@ -105,6 +113,8 @@ BoardItem itemFromJson(const QJsonObject &o) {
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
+    if (item.isConnector() && arrows().contains(o.value("arrow").toString()))
+        item.arrow = o.value("arrow").toString();
     // A connector follows its shapes, so it is in no group of its own.
     if (!item.isConnector())
         item.group = std::max(0, o.value("group").toInt());
@@ -238,9 +248,13 @@ Board::Board(QObject *parent) : QAbstractListModel(parent) {
                              emit shownColorChanged();
                          if (roles.isEmpty() || roles.contains(StrokeRole))
                              emit shownStrokeChanged();
+                         if (roles.isEmpty() || roles.contains(ArrowRole))
+                             emit shownArrowChanged();
                      });
     QObject::connect(this, &Board::selectionChanged, this, &Board::shownStrokeChanged);
     QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::shownStrokeChanged);
+    QObject::connect(this, &Board::selectionChanged, this, &Board::shownArrowChanged);
+    QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::shownArrowChanged);
     QObject::connect(this, &Board::selectionChanged, this, &Board::groupingChanged);
     QObject::connect(this, &QAbstractItemModel::modelReset, this, &Board::groupingChanged);
 }
@@ -317,6 +331,27 @@ void Board::ungroupSelection() {
     emit changed();
 }
 
+bool Board::connectorSelected() const {
+    for (const BoardItem &item : m_items)
+        if (item.isConnector() && m_selected.contains(item.id))
+            return true;
+    return false;
+}
+
+QString Board::shownArrow() const {
+    QString shown;
+    bool any = false;
+    for (const BoardItem &item : m_items) {
+        if (!m_selected.contains(item.id) || !item.isConnector())
+            continue;
+        if (any && item.arrow != shown)
+            return QStringLiteral("mixed");
+        shown = item.arrow;
+        any = true;
+    }
+    return any ? shown : m_arrow;
+}
+
 QString Board::shownStroke() const {
     QString shown;
     bool any = false;
@@ -353,7 +388,7 @@ QHash<int, QByteArray> Board::roleNames() const {
     return {{IdRole, "itemId"}, {KindRole, "kind"}, {XRole, "ix"}, {YRole, "iy"}, {WRole, "iw"}, {HRole, "ih"},
             {LabelRole, "label"}, {FillRole, "fill"}, {FontSizeRole, "fontSize"}, {SelectedRole, "selected"},
             {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"},
-            {StrokeRole, "strokeStyle"}};
+            {StrokeRole, "strokeStyle"}, {ArrowRole, "arrowStyle"}};
 }
 
 QVariant Board::data(const QModelIndex &index, int role) const {
@@ -378,6 +413,7 @@ QVariant Board::data(const QModelIndex &index, int role) const {
     case RotationRole: return item.rotation;
     case IconRole: return item.icon;
     case StrokeRole: return item.stroke;
+    case ArrowRole: return item.arrow;
     }
     return {};
 }
@@ -579,6 +615,7 @@ int Board::link(int from, int to) {
     item.kind = "connector";
     item.from = from;
     item.to = to;
+    item.arrow = m_arrow;
     return insert(item);
 }
 
@@ -591,6 +628,8 @@ int Board::linkToNew(int from, double x, double y) {
     checkpoint();
     BoardItem item = *source;
     item.text.clear();
+    // The copy stands by itself, whatever its source is grouped with.
+    item.group = 0;
     item.x = x - item.w / 2;
     item.y = y - item.h / 2;
     const int id = insert(item);
@@ -598,6 +637,7 @@ int Board::linkToNew(int from, double x, double y) {
     connector.kind = "connector";
     connector.from = from;
     connector.to = id;
+    connector.arrow = m_arrow;
     insert(connector);
     setSelection({id});
     return id;
@@ -962,6 +1002,28 @@ void Board::setSelectionStroke(const QString &stroke) {
             continue;
         item.stroke = style;
         emit dataChanged(index(i), index(i), {StrokeRole});
+    }
+    emit changed();
+}
+
+void Board::setSelectionArrow(const QString &arrow) {
+    const QString style = arrows().contains(arrow) ? arrow : QString();
+    if (style != m_arrow) {
+        m_arrow = style;
+        emit shownArrowChanged();
+    }
+    bool any = false;
+    for (const BoardItem &item : m_items)
+        any = any || (m_selected.contains(item.id) && item.isConnector() && item.arrow != style);
+    if (!any)
+        return;
+    checkpoint();
+    for (int i = 0; i < m_items.size(); ++i) {
+        BoardItem &item = m_items[i];
+        if (!m_selected.contains(item.id) || !item.isConnector() || item.arrow == style)
+            continue;
+        item.arrow = style;
+        emit dataChanged(index(i), index(i), {ArrowRole});
     }
     emit changed();
 }
@@ -1344,7 +1406,7 @@ QVariantMap Board::item(int id) const {
     if (!item)
         return {};
     return {{"id", item->id}, {"kind", item->kind}, {"x", item->x}, {"y", item->y}, {"w", item->w},
-            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke}, {"group", item->group},
+            {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke}, {"group", item->group}, {"arrow", item->arrow},
             {"fontSize", item->fontSize},
             {"rotation", item->rotation}, {"icon", item->icon}};
 }

@@ -1276,7 +1276,7 @@ Item {
 
                 DelegateChoice {
                     roleValue: "connector"
-                    Stroke { zoom: view.zoom; arrow: true }
+                    Stroke { zoom: view.zoom; connector: true }
                 }
             }
         }
@@ -1620,8 +1620,16 @@ Item {
         required property string fill
         required property bool selected
         required property string strokeStyle
+        required property string arrowStyle
         property real zoom: 1
-        property bool arrow: false
+        property bool connector: false
+        // A connection points at the shape it was drawn to, at the one it
+        // was drawn from, or at neither. The line stops inside an arrow's
+        // head, so the tip stays sharp.
+        readonly property bool headAtEnd: connector && arrowStyle === "" && length > 14
+        readonly property bool headAtStart: connector && arrowStyle === "start" && length > 14
+        readonly property real from: connector && arrowStyle === "start" ? Math.min(6, length) : 0
+        readonly property real to: Math.max(from, length - (connector && arrowStyle === "" ? 6 : 0))
         readonly property real length: Math.hypot(x2 - x1, y2 - y1)
         readonly property color ink: fill ? theme.colors[fill] : theme.foreground
         x: x1
@@ -1640,7 +1648,8 @@ Item {
         }
         Rectangle {
             visible: stroke.strokeStyle === ""
-            width: Math.max(0, stroke.length - (stroke.arrow ? 6 : 0))
+            x: stroke.from
+            width: stroke.to - stroke.from
             height: 2
             y: -1
             radius: 1
@@ -1657,14 +1666,13 @@ Item {
                 strokeStyle: ShapePath.DashLine
                 dashPattern: view.dashesOf(stroke.strokeStyle)
                 capStyle: stroke.strokeStyle === "dashed" ? ShapePath.FlatCap : ShapePath.RoundCap
-                startX: 0
+                startX: stroke.from
                 startY: 0
-                // An arrow's line stops inside its head, so the tip stays sharp.
-                PathLine { x: Math.max(0, stroke.length - (stroke.arrow ? 6 : 0)); y: 0 }
+                PathLine { x: stroke.to; y: 0 }
             }
         }
         Shape {
-            visible: stroke.arrow && stroke.length > 14
+            visible: stroke.headAtEnd
             x: stroke.length
             preferredRendererType: Shape.CurveRenderer
             ShapePath {
@@ -1674,6 +1682,19 @@ Item {
                 startY: 0
                 PathLine { x: -13; y: -6 }
                 PathLine { x: -13; y: 6 }
+                PathLine { x: 0; y: 0 }
+            }
+        }
+        Shape {
+            visible: stroke.headAtStart
+            preferredRendererType: Shape.CurveRenderer
+            ShapePath {
+                strokeColor: "transparent"
+                fillColor: stroke.ink
+                startX: 0
+                startY: 0
+                PathLine { x: 13; y: -6 }
+                PathLine { x: 13; y: 6 }
                 PathLine { x: 0; y: 0 }
             }
         }

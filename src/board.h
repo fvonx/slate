@@ -24,6 +24,9 @@ struct BoardItem {
     int fontSize = 24;
     double rotation = 0; // degrees, about the middle of its box
     int from = 0, to = 0;
+    // Where a connector's arrow is: empty for the end it was drawn to,
+    // "start" for the one it was drawn from, "none" for no arrow.
+    QString arrow;
     int group = 0; // the group it is part of, or 0: grouped things are selected and arranged as one
 
     bool isConnector() const { return kind == QLatin1String("connector"); }
@@ -38,7 +41,7 @@ struct BoardItem {
     }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
-            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to && group == o.group;
+            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to && arrow == o.arrow && group == o.group;
     }
 };
 
@@ -61,6 +64,8 @@ class Board : public QAbstractListModel {
     Q_PROPERTY(QRectF groupBounds READ movableBounds NOTIFY selectionGeometryChanged)
     Q_PROPERTY(QString shownColor READ shownColor NOTIFY shownColorChanged)
     Q_PROPERTY(QString shownStroke READ shownStroke NOTIFY shownStrokeChanged)
+    Q_PROPERTY(QString shownArrow READ shownArrow NOTIFY shownArrowChanged)
+    Q_PROPERTY(bool connectorSelected READ connectorSelected NOTIFY selectionChanged)
     Q_PROPERTY(int arrangeCount READ arrangeCount NOTIFY groupingChanged)
     Q_PROPERTY(bool canGroup READ canGroup NOTIFY groupingChanged)
     Q_PROPERTY(bool canUngroup READ canUngroup NOTIFY groupingChanged)
@@ -74,7 +79,7 @@ class Board : public QAbstractListModel {
 public:
     enum Role {
         IdRole = Qt::UserRole + 1, KindRole, XRole, YRole, WRole, HRole, LabelRole, FillRole, FontSizeRole,
-        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole, StrokeRole
+        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole, StrokeRole, ArrowRole
     };
 
     explicit Board(QObject *parent = nullptr);
@@ -112,6 +117,11 @@ public:
     // The same for the outline's style: solid (empty), dashed, dotted, or
     // "mixed". Only what has an outline to style counts.
     QString shownStroke() const;
+    // And for where the arrow is: that of the selected connections (empty
+    // for the end, "start", "none", or "mixed"), or what the next one takes.
+    QString shownArrow() const;
+    // Whether a connection is among what is selected.
+    bool connectorSelected() const;
     bool canUndo() const { return !m_undo.isEmpty(); }
     bool canRedo() const { return !m_redo.isEmpty(); }
     bool hasView() const { return m_hasView; }
@@ -161,6 +171,8 @@ public:
     // Solid (empty), dashed, or dotted, for the selection and for what is
     // drawn next.
     Q_INVOKABLE void setSelectionStroke(const QString &stroke);
+    // Where the arrow is on the selected connections, and on the next drawn.
+    Q_INVOKABLE void setSelectionArrow(const QString &arrow);
     Q_INVOKABLE void removeSelection();
     Q_INVOKABLE void removeItem(int id);
 
@@ -207,6 +219,7 @@ signals:
     void colorChanged();
     void shownColorChanged();
     void shownStrokeChanged();
+    void shownArrowChanged();
     void undoChanged();
     void groupingChanged();
     // A board was opened: the window takes its saved view.
@@ -249,6 +262,7 @@ private:
     int m_nextId = 1;
     QString m_color;
     QString m_stroke;
+    QString m_arrow;
     QVector<Snapshot> m_undo, m_redo;
     bool m_hasView = false;
     double m_viewX = 0, m_viewY = 0, m_viewZoom = 1;

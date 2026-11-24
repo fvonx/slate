@@ -889,6 +889,12 @@ private slots:
         QVERIFY(std::abs((board.find(c)->x - 250) - (900 - board.find(c)->x - 40)) < 1e-9);
         board.undo();
 
+        // A connected copy grown from one of them is not in the group.
+        const int grown = board.linkToNew(a, 400, 400);
+        QCOMPARE(board.find(grown)->group, 0);
+        board.selectOnly(grown);
+        board.removeSelection();
+
         // A copy of a group is a group of its own.
         board.selectOnly(a);
         QVERIFY(board.duplicate(0, 0, false));
@@ -949,6 +955,78 @@ private slots:
         again.toggle(2);
         again.groupSelection();
         QVERIFY(again.find(1)->group > 9);
+    }
+
+    void connectionsPointEitherWayOrNeither() {
+        Board board;
+        QSignalSpy shown(&board, &Board::shownArrowChanged);
+        const int a = board.add("rect", 0, 0, 100, 100);
+        const int b = board.add("rect", 300, 0, 100, 100);
+        const int c = board.add("rect", 600, 0, 100, 100);
+        // A connection points at what it was drawn to, unless told otherwise.
+        const int first = board.link(a, b);
+        QCOMPARE(board.find(first)->arrow, QString());
+        QCOMPARE(board.shownArrow(), QString());
+        QVERIFY(!board.connectorSelected());
+
+        board.selectOnly(first);
+        QVERIFY(board.connectorSelected());
+        board.setSelectionArrow("start");
+        QCOMPARE(board.find(first)->arrow, QString("start"));
+        QCOMPARE(board.shownArrow(), QString("start"));
+        QVERIFY(shown.count() > 0);
+        QCOMPARE(board.data(board.index(board.items().indexOf(*board.find(first))), Board::ArrowRole).toString(),
+                 QString("start"));
+        // Where it runs between is left alone: only the arrow changes ends.
+        QCOMPARE(board.find(first)->from, a);
+        QCOMPARE(board.find(first)->to, b);
+
+        // The next connection takes what was picked last, drawn to a shape
+        // or to a new one; shapes are not touched by it.
+        const int second = board.link(b, c);
+        QCOMPARE(board.find(second)->arrow, QString("start"));
+        board.clearSelection();
+        board.setSelectionArrow("none");
+        QCOMPARE(board.find(first)->arrow, QString("start"));
+        const int grown = board.linkToNew(c, 900, 50);
+        int third = 0;
+        for (const BoardItem &item : board.items())
+            if (item.isConnector() && item.to == grown)
+                third = item.id;
+        QCOMPARE(board.find(third)->arrow, QString("none"));
+        QCOMPARE(board.find(grown)->arrow, QString());
+
+        // The menu marks what is selected, and says when there is more than
+        // one; anything unknown is the arrow at the end, and one undo takes
+        // a change back.
+        board.selectOnly(first);
+        QCOMPARE(board.shownArrow(), QString("start"));
+        board.toggle(third);
+        QCOMPARE(board.shownArrow(), QString("mixed"));
+        board.setSelectionArrow("sideways");
+        QCOMPARE(board.find(first)->arrow, QString());
+        QCOMPARE(board.find(third)->arrow, QString());
+        QCOMPARE(board.find(second)->arrow, QString("start"));
+        board.undo();
+        QCOMPARE(board.find(first)->arrow, QString("start"));
+        QCOMPARE(board.find(third)->arrow, QString("none"));
+
+        // It is saved with the board, left out for the arrow at the end,
+        // and never kept on anything but a connection.
+        const QJsonObject saved = board.toJson();
+        Board again;
+        again.load(saved);
+        QCOMPARE(again.find(first)->arrow, QString("start"));
+        QCOMPARE(again.find(third)->arrow, QString("none"));
+        again.load(QJsonObject{{"items", QJsonArray{
+            QJsonObject{{"id", 1}, {"kind", "rect"}, {"w", 10}, {"h", 10}, {"arrow", "none"}},
+            QJsonObject{{"id", 2}, {"kind", "rect"}, {"x", 50}, {"w", 10}, {"h", 10}},
+            QJsonObject{{"id", 3}, {"kind", "connector"}, {"from", 1}, {"to", 2}, {"arrow", "sideways"}},
+            QJsonObject{{"id", 4}, {"kind", "connector"}, {"from", 2}, {"to", 1}, {"arrow", "none"}}}}});
+        QCOMPARE(again.find(1)->arrow, QString());
+        QCOMPARE(again.find(3)->arrow, QString());
+        QCOMPARE(again.find(4)->arrow, QString("none"));
+        QVERIFY(!again.toJson().value("items").toArray().at(2).toObject().contains("arrow"));
     }
 
     void outlinesAreSolidDashedOrDotted() {
@@ -2020,6 +2098,45 @@ private slots:
         QTest::keyClick(window, Qt::Key_S);
         QTest::keyClick(window, Qt::Key_S);
         board->removeItem(outlined);
+
+        // The connect button opens the ways to connect. With no connection
+        // selected, picking one takes up the connect tool with it; with one
+        // selected, it changes that one and leaves the tool alone. A steps on.
+        auto *connectMenu = window->findChild<QObject *>("connectMenu");
+        auto *connectButton = visualChild(window->contentItem(), "tool-connect");
+        QVERIFY(connectButton);
+        board->clearSelection();
+        QTest::mouseClick(window, Qt::LeftButton, {}, connectButton->mapToScene({21, 21}).toPoint());
+        QTRY_VERIFY(connectMenu->property("opened").toBool());
+        auto *connectContent = connectMenu->property("contentItem").value<QQuickItem *>();
+        QVERIFY(visualChild(connectContent, "connect-end")->property("current").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, {},
+                          visualChild(connectContent, "connect-none")->mapToScene({20, 16}).toPoint());
+        QTRY_VERIFY(!connectMenu->property("visible").toBool());
+        QCOMPARE(board->shownArrow(), QString("none"));
+        QCOMPARE(view->property("tool").toString(), QString("connect"));
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCOMPARE(view->property("tool").toString(), QString("select"));
+        const int endA = board->add("rect", 3000, 3000, 50, 50), endB = board->add("rect", 3200, 3000, 50, 50);
+        const int wire = board->link(endA, endB);
+        QCOMPARE(board->find(wire)->arrow, QString("none"));
+        board->selectOnly(wire);
+        QTest::mouseClick(window, Qt::LeftButton, {}, connectButton->mapToScene({21, 21}).toPoint());
+        QTRY_VERIFY(connectMenu->property("opened").toBool());
+        QVERIFY(visualChild(connectContent, "connect-none")->property("current").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, {},
+                          visualChild(connectContent, "connect-start")->mapToScene({20, 16}).toPoint());
+        QTRY_VERIFY(!connectMenu->property("visible").toBool());
+        QCOMPARE(board->find(wire)->arrow, QString("start"));
+        QCOMPARE(view->property("tool").toString(), QString("select"));
+        QTest::keyClick(window, Qt::Key_A);
+        QCOMPARE(board->find(wire)->arrow, QString("none"));
+        QTest::keyClick(window, Qt::Key_A);
+        QCOMPARE(board->find(wire)->arrow, QString());
+        board->selectOnly(endA);
+        board->toggle(endB);
+        board->removeSelection();
+        QCOMPARE(board->shownArrow(), QString());
         board->selectOnly(postit);
 
         // Alt and an arrow lines the selection up on that side.

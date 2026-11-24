@@ -21,7 +21,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 - **Arrange**: select several shapes and press `Alt` with an arrow to line them up on that side; with three or more, `Alt+Shift+H` and `Alt+Shift+V` space them evenly between the outermost two, across or up and down; `]` and `[` bring the selection to the front or send it to the back. The toolbar's arrange menu has the same.
 - **Group**: `Ctrl+G`, or the arrange menu, makes one group of the selected shapes: a click on any of them selects them all, so they move, resize, line up, and go to the front or back as one, and a copy is a group of its own. `Ctrl+Shift+G` takes the group apart. Grouping groups makes one group of them all.
 - **Write**: double-click a shape to label it, or empty canvas for free text. Enter finishes, Shift+Enter starts a new line.
-- **Connect**: hover a shape and drag from one of the dots on its sides to another shape. Let go over empty canvas and a connected copy of the shape appears there, ready to be labelled. `C` does the same from anywhere on a shape.
+- **Connect**: hover a shape and drag from one of the dots on its sides to another shape. Let go over empty canvas and a connected copy of the shape appears there, ready to be labelled. `C` does the same from anywhere on a shape. The connect button's menu says where the arrow is: at the end you drew to, at the start, or nowhere. It changes the selected connections, or else the ones you draw next; `A` steps through the three.
 - **Export**: `PDF` and `SVG`, beside the board's name, save the board to your Downloads folder, drawn as it looks in the window.
 - **Move around**: the mouse wheel zooms on the pointer; two fingers on a touchpad pan, and pinch zooms. Hold Space, or the middle or right button, and drag to pan.
 
@@ -33,6 +33,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | `I` | Place an icon |
 | `X`, or `T` twice | Write text |
 | `C` | Connect two shapes |
+| `A` | Move a connection's arrow to its other end, or take it away |
 | `V`, `Esc` | Select and move |
 | `Enter` | Write on the selected shape |
 | `1` – `8` | Color the selection (1 is no color); the same colors are in the toolbar menu |
