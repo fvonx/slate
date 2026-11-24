@@ -181,6 +181,8 @@ ApplicationWindow {
     Shortcut { sequence: "Alt+Down"; enabled: win.keys; onActivated: board.alignSelection("bottom") }
     Shortcut { sequence: "Alt+H"; enabled: win.keys; onActivated: board.alignSelection("center") }
     Shortcut { sequence: "Alt+V"; enabled: win.keys; onActivated: board.alignSelection("middle") }
+    Shortcut { sequence: "Alt+Shift+H"; enabled: win.keys; onActivated: board.alignSelection("spreadAcross") }
+    Shortcut { sequence: "Alt+Shift+V"; enabled: win.keys; onActivated: board.alignSelection("spreadDown") }
     Shortcut { sequence: "]"; enabled: win.keys; onActivated: board.bringToFront() }
     Shortcut { sequence: "["; enabled: win.keys; onActivated: board.sendToBack() }
     Shortcut { sequence: "Shift+Left"; enabled: win.keys; onActivated: win.nudge(-10, 0) }
@@ -829,8 +831,9 @@ ApplicationWindow {
                             LayoutMirroring.childrenInherit: true
 
                             Repeater {
-                                // Aligning needs two things to line up; the
-                                // order needs one to move.
+                                // Aligning needs two things to line up,
+                                // spacing needs a third between them, and
+                                // the order needs one to move.
                                 model: [
                                     { name: "left", label: qsTr("Align left"), key: "Alt+←", needs: 2,
                                       icon: "M3 3 V17 M6 5.5 H16 V9 H6 Z M6 11 H11.5 V14.5 H6 Z" },
@@ -844,6 +847,10 @@ ApplicationWindow {
                                       icon: "M3 10 H17 M5.5 4.5 V15.5 H9 V4.5 Z M11 7 V13 H14.5 V7 Z" },
                                     { name: "bottom", label: qsTr("Align bottom"), key: "Alt+↓", needs: 2,
                                       icon: "M3 17 H17 M5.5 4 V14 H9 V4 Z M11 8.5 V14 H14.5 V8.5 Z" },
+                                    { name: "spreadAcross", label: qsTr("Distribute horizontally"), key: "Alt+Shift+H", needs: 3,
+                                      icon: "M3 3 V17 M17 3 V17 M6 6 H8.5 V14 H6 Z M11.5 6 H14 V14 H11.5 Z" },
+                                    { name: "spreadDown", label: qsTr("Distribute vertically"), key: "Alt+Shift+V", needs: 3,
+                                      icon: "M3 3 H17 M3 17 H17 M6 6 V8.5 H14 V6 Z M6 11.5 V14 H14 V11.5 Z" },
                                     { name: "front", label: qsTr("Bring to front"), key: "]", needs: 1,
                                       icon: "M8 8 H17 V17 H8 Z M3 12 V3 H12" },
                                     { name: "back", label: qsTr("Send to back"), key: "[", needs: 1,
@@ -1288,6 +1295,7 @@ ApplicationWindow {
             { keys: "← ↑ ↓ →", action: qsTr("Nudge the selection") },
             { keys: "Alt+← ↑ ↓ →", action: qsTr("Align the selected shapes on that side") },
             { keys: "Alt+H · Alt+V", action: qsTr("Center the selected shapes on each other, across or up and down") },
+            { keys: "Alt+Shift+H · V", action: qsTr("Space the selected shapes evenly, across or up and down") },
             { keys: "]  [", action: qsTr("Bring to the front or send to the back") },
             { keys: "+  −  0", action: qsTr("Zoom in, out, and back to 100%") },
             { keys: "Shift+F", action: qsTr("Fit everything in the window") },

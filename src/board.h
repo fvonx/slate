@@ -134,6 +134,9 @@ public:
     // them, each time the pointer moves, in a new box in place of the old.
     Q_INVOKABLE void beginScale();
     Q_INVOKABLE void scaleSelectionTo(double x, double y, double w, double h);
+    // Lines the selection up on a side (left, right, top, bottom) or on its
+    // middle (center, middle), or spaces three or more evenly between the
+    // outermost two (spreadAcross, spreadDown).
     Q_INVOKABLE void alignSelection(const QString &edge);
     Q_INVOKABLE void bringToFront();
     Q_INVOKABLE void sendToBack();

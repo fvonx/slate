@@ -645,7 +645,36 @@ void Board::alignSelection(const QString &edge) {
     }
     if (found < 2)
         return;
+    // Spread out: the things keep their order and the room they take up
+    // together, and the gaps between one and the next all become the same.
+    // What they overlap by is evened out the same way.
+    const bool across = edge == QLatin1String("spreadAcross"), down = edge == QLatin1String("spreadDown");
+    QHash<int, QPointF> spread;
+    if (across || down) {
+        if (found < 3)
+            return;
+        QVector<QPair<int, QRectF>> order;
+        double taken = 0;
+        for (const BoardItem &item : m_items) {
+            if (!m_selected.contains(item.id) || item.isConnector())
+                continue;
+            const QRectF b = bounds(item);
+            order.append({item.id, b});
+            taken += across ? b.width() : b.height();
+        }
+        std::stable_sort(order.begin(), order.end(), [&](const auto &a, const auto &b) {
+            return across ? a.second.center().x() < b.second.center().x() : a.second.center().y() < b.second.center().y();
+        });
+        const double gap = ((across ? all.width() : all.height()) - taken) / (order.size() - 1);
+        double at = across ? all.left() : all.top();
+        for (const auto &[id, b] : std::as_const(order)) {
+            spread.insert(id, across ? QPointF(at - b.left(), 0) : QPointF(0, at - b.top()));
+            at += (across ? b.width() : b.height()) + gap;
+        }
+    }
     auto shift = [&](const BoardItem &item) {
+        if (across || down)
+            return spread.value(item.id);
         const QRectF b = bounds(item);
         if (edge == QLatin1String("left")) return QPointF(all.left() - b.left(), 0);
         if (edge == QLatin1String("right")) return QPointF(all.right() - b.right(), 0);

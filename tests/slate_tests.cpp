@@ -315,6 +315,47 @@ private slots:
         const double centerY = board.selectionBounds().center().y();
         for (int id : {a, b, c, line})
             QVERIFY(std::abs(board.boundsOf(id).center().y() - centerY) < 1e-9);
+        // Spread out: three or more keep their order and the outermost two
+        // their places, and the gaps between them become the same.
+        {
+            Board row;
+            const int left = row.add("rect", 0, 0, 100, 50);
+            const int mid = row.add("ellipse", 130, 200, 60, 60);
+            // Stood on its end, it takes the room it is seen to take.
+            const int bar = row.add("rect", 500, 90, 100, 20);
+            row.setRotation(bar, 90);
+            const int right = row.add("rect", 800, 400, 200, 80);
+            row.selectOnly(left);
+            row.toggle(right);
+            // Two have nothing between them to space.
+            row.alignSelection("spreadAcross");
+            QCOMPARE(row.find(right)->x, 800.0);
+            row.selectAll();
+            row.alignSelection("spreadAcross");
+            QCOMPARE(row.boundsOf(left).left(), 0.0);
+            QCOMPARE(row.boundsOf(right).right(), 1000.0);
+            const double gap = row.boundsOf(mid).left() - row.boundsOf(left).right();
+            QVERIFY(std::abs(gap - (1000 - 100 - 60 - 20 - 200) / 3.0) < 1e-9);
+            QVERIFY(std::abs(row.boundsOf(bar).left() - row.boundsOf(mid).right() - gap) < 1e-9);
+            QVERIFY(std::abs(row.boundsOf(right).left() - row.boundsOf(bar).right() - gap) < 1e-9);
+            // Up and down was left alone, and one undo takes it all back.
+            QCOMPARE(row.find(mid)->y, 200.0);
+            row.undo();
+            QCOMPARE(row.find(mid)->x, 130.0);
+
+            row.alignSelection("spreadDown");
+            QCOMPARE(row.boundsOf(left).top(), 0.0);
+            QCOMPARE(row.boundsOf(right).bottom(), 480.0);
+            const double fall = row.boundsOf(bar).top() - row.boundsOf(left).bottom();
+            QVERIFY(std::abs(row.boundsOf(mid).top() - row.boundsOf(bar).bottom() - fall) < 1e-9);
+            QVERIFY(std::abs(row.boundsOf(right).top() - row.boundsOf(mid).bottom() - fall) < 1e-9);
+            QCOMPARE(row.find(mid)->x, 130.0);
+            // Already even, there is nothing to do and nothing to undo.
+            row.alignSelection("spreadDown");
+            row.undo();
+            QCOMPARE(row.find(mid)->y, 200.0);
+        }
+
         // Centering across left the heights alone, and the other way round.
         QVERIFY(std::abs(board.boundsOf(a).center().x() - centerX) < 1e-9);
         board.undo();
@@ -1857,6 +1898,43 @@ private slots:
         arrange("left");
         for (const BoardItem &item : board->items())
             QVERIFY(std::abs(board->boundsOf(item.id).left() - board->selectionBounds().left()) < 1e-6);
+        // Alt+Shift+V spaces them evenly up and down, and the menu does the
+        // same across: the gap from each to the next is the same.
+        auto evenly = [&](bool across) {
+            QVector<QRectF> boxes;
+            for (const BoardItem &item : board->items())
+                if (!item.isConnector())
+                    boxes << board->boundsOf(item.id);
+            std::sort(boxes.begin(), boxes.end(), [&](const QRectF &a, const QRectF &b) {
+                return across ? a.center().x() < b.center().x() : a.center().y() < b.center().y();
+            });
+            if (boxes.size() < 3)
+                return false;
+            const auto gap = [&](int i) {
+                return across ? boxes[i + 1].left() - boxes[i].right() : boxes[i + 1].top() - boxes[i].bottom();
+            };
+            for (int i = 1; i + 1 < boxes.size(); ++i)
+                if (std::abs(gap(i) - gap(0)) > 1e-6)
+                    return false;
+            return true;
+        };
+        // Set apart first, each further from the last than the one before.
+        int apart = 0;
+        for (const BoardItem &item : board->items()) {
+            if (item.isConnector())
+                continue;
+            board->selectOnly(item.id);
+            board->moveSelection(apart * apart * 400, apart * apart * 300);
+            ++apart;
+        }
+        board->selectAll();
+        QVERIFY(!evenly(false));
+        QTest::keySequence(window, QKeySequence("Alt+Shift+V"));
+        QVERIFY(evenly(false));
+        QVERIFY(!evenly(true));
+        arrange("spreadAcross");
+        QVERIFY(evenly(true));
+        QVERIFY(evenly(false));
         board->selectOnly(board->items().first().id);
         const int first = board->items().first().id;
         arrange("front");
