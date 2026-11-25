@@ -2,11 +2,15 @@
 
 #include <QColor>
 #include <QObject>
+#include <QSet>
 #include <QTimer>
+#include <QUrl>
 #include <QVariantList>
 #include <QVariantMap>
 
 #include "board.h"
+
+class FilePicker;
 
 // The boards on disk, one JSON file each, and the one that is open. Every
 // change is saved on its own a moment later, so there is nothing to save by
@@ -18,6 +22,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString currentId READ currentId NOTIFY currentChanged)
     Q_PROPERTY(QString currentName READ currentName NOTIFY currentChanged)
     Q_PROPERTY(QString saveError READ saveError NOTIFY saveErrorChanged)
+    Q_PROPERTY(QString imageFolder READ imageFolder CONSTANT)
 
 public:
     // Tests pass a temp directory.
@@ -30,6 +35,20 @@ public:
     QString currentName() const;
     // The file a save failed on, or empty; the window words the message.
     QString saveError() const { return m_saveError; }
+
+    // Where the boards' images are kept, as a URL for the window to load
+    // them from.
+    QString imageFolder() const;
+
+    // Asks for image files; `imagesChosen` has them once they are picked.
+    Q_INVOKABLE void pickImages();
+    // Copies an image file in among Slate's own, so the board keeps it when
+    // the original is moved or deleted, and answers with `ok`, the `name`
+    // it has there, and its `width` and `height`; or with the `file` that
+    // is no image. The same picture is kept once however often it is added.
+    Q_INVOKABLE QVariantMap importImage(const QUrl &url);
+    // Tests put a fake in place of the desktop's file dialog.
+    void setFilePicker(FilePicker *picker);
 
     Q_INVOKABLE void newBoard();
     Q_INVOKABLE void open(const QString &id);
@@ -50,6 +69,9 @@ signals:
     void boardsChanged();
     void currentChanged();
     void saveErrorChanged();
+    void imagesChosen(const QVariantList &urls);
+    // The file dialog could not be shown.
+    void pickFailed();
 
 private:
     struct Info {
@@ -63,6 +85,8 @@ private:
     bool write(const QString &id, const QJsonObject &object);
     void rememberCurrent();
     void step(int by);
+    QString imagePath() const { return m_directory + "/images"; }
+    void forgetUnusedImages(const QSet<QString> &used);
 
     QString m_directory;
     QString m_exportDirectory;
@@ -72,4 +96,5 @@ private:
     bool m_dirty = false;
     QTimer m_saveTimer;
     QString m_saveError;
+    FilePicker *m_picker = nullptr;
 };

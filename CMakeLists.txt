@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Test)
+find_package(Qt6 REQUIRED COMPONENTS Core DBus Gui Network Qml Quick QuickControls2 Svg Test)
 
 # Everything but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
@@ -18,7 +18,7 @@ list(REMOVE_ITEM slate_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
 add_library(slate_core STATIC ${slate_sources})
 target_include_directories(slate_core PUBLIC src)
 target_link_libraries(slate_core PUBLIC
-  Qt6::Core Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Svg)
+  Qt6::Core Qt6::DBus Qt6::Gui Qt6::Network Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::Svg)
 target_compile_options(slate_core PUBLIC -Wall -Wextra)
 
 add_executable(slate src/main.cpp src/resources.qrc)

@@ -8,6 +8,7 @@
 #include <QMap>
 #include <QMimeData>
 #include <QPolygonF>
+#include <QRegularExpression>
 #include <cmath>
 #include <numeric>
 
@@ -19,7 +20,7 @@ const double edgeGap = 5;
 const int undoLimit = 200;
 
 const QStringList &kinds() {
-    static const QStringList kinds{"rect", "ellipse", "triangle", "rhombus", "arrow", "postit", "icon", "frame", "text", "line", "connector"};
+    static const QStringList kinds{"rect", "ellipse", "triangle", "rhombus", "arrow", "postit", "icon", "image", "frame", "text", "line", "connector"};
     return kinds;
 }
 
@@ -64,6 +65,8 @@ QJsonObject itemToJson(const BoardItem &item) {
         o["fontSize"] = item.fontSize;
     if (item.kind == QLatin1String("icon"))
         o["icon"] = item.icon;
+    if (item.kind == QLatin1String("image"))
+        o["image"] = item.image;
     if (item.rotation != 0)
         o["rotation"] = item.rotation;
     if (item.group != 0)
@@ -110,6 +113,9 @@ BoardItem itemFromJson(const QJsonObject &o) {
         if (iconPath(item.icon).isEmpty())
             item.icon = QStringLiteral("question");
     }
+    // An image whose name isn't one is kept, and drawn as an empty box.
+    if (item.kind == QLatin1String("image") && Board::isImageName(o.value("image").toString()))
+        item.image = o.value("image").toString();
     item.fontSize = std::clamp(o.value("fontSize").toInt(24), 8, 400);
     item.from = o.value("from").toInt();
     item.to = o.value("to").toInt();
@@ -413,7 +419,7 @@ int Board::rowCount(const QModelIndex &parent) const {
 QHash<int, QByteArray> Board::roleNames() const {
     return {{IdRole, "itemId"}, {KindRole, "kind"}, {XRole, "ix"}, {YRole, "iy"}, {WRole, "iw"}, {HRole, "ih"},
             {LabelRole, "label"}, {FillRole, "fill"}, {FontSizeRole, "fontSize"}, {SelectedRole, "selected"},
-            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"},
+            {X1Role, "x1"}, {Y1Role, "y1"}, {X2Role, "x2"}, {Y2Role, "y2"}, {RotationRole, "rot"}, {IconRole, "iconName"}, {ImageRole, "imageName"},
             {StrokeRole, "strokeStyle"}, {ArrowRole, "arrowStyle"}};
 }
 
@@ -438,6 +444,7 @@ QVariant Board::data(const QModelIndex &index, int role) const {
     case Y2Role: return line(item).y2();
     case RotationRole: return item.rotation;
     case IconRole: return item.icon;
+    case ImageRole: return item.image;
     case StrokeRole: return item.stroke;
     case ArrowRole: return item.arrow;
     }
@@ -625,6 +632,22 @@ int Board::addIcon(const QString &name, double x, double y, double w, double h) 
     const int id = add("icon", x, y, w, h);
     m_items[row(id)].icon = name;
     emit dataChanged(index(row(id)), index(row(id)), {IconRole});
+    return id;
+}
+
+bool Board::isImageName(const QString &name) {
+    static const QRegularExpression pattern(QStringLiteral("^[0-9a-f]{40}\\.[a-z0-9]{1,8}$"));
+    return pattern.match(name).hasMatch();
+}
+
+int Board::addImage(const QString &name, double x, double y, double w, double h) {
+    if (!isImageName(name))
+        return 0;
+    const int id = add("image", x, y, w, h);
+    m_items[row(id)].image = name;
+    // A picture has its own colors, so it takes none of the board's.
+    m_items[row(id)].color.clear();
+    emit dataChanged(index(row(id)), index(row(id)), {ImageRole, FillRole});
     return id;
 }
 
@@ -1470,7 +1493,7 @@ QVariantMap Board::item(int id) const {
     return {{"id", item->id}, {"kind", item->kind}, {"x", item->x}, {"y", item->y}, {"w", item->w},
             {"h", item->h}, {"text", item->text}, {"color", item->color}, {"stroke", item->stroke}, {"group", item->group}, {"arrow", item->arrow},
             {"fontSize", item->fontSize},
-            {"rotation", item->rotation}, {"icon", item->icon}};
+            {"rotation", item->rotation}, {"icon", item->icon}, {"image", item->image}};
 }
 
 QPointF Board::edgePoint(int id, double towardX, double towardY) const {

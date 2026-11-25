@@ -323,7 +323,7 @@ Item {
         if (editing)
             commitEdit()
         const it = board.item(id)
-        if (!it.kind || it.kind === "line" || it.kind === "connector" || it.kind === "icon")
+        if (!it.kind || it.kind === "line" || it.kind === "connector" || it.kind === "icon" || it.kind === "image")
             return
         board.checkpoint()
         board.selectOnly(id)
@@ -1245,6 +1245,48 @@ Item {
                                 capStyle: ShapePath.RoundCap
                                 joinStyle: ShapePath.RoundJoin
                                 PathSvg { path: board.iconPath(iconBody.iconName) }
+                            }
+                        }
+                    }
+                }
+
+                DelegateChoice {
+                    roleValue: "image"
+                    Body {
+                        id: imageBody
+                        required property string imageName
+                        zoom: view.zoom
+                        editingId: view.editingId
+                        showsLabel: false
+                        // Stretched over its box, so it is sized as any
+                        // shape is. Loaded off the window's thread, since a
+                        // photo takes a moment to decode.
+                        Image {
+                            id: picture
+                            anchors.fill: parent
+                            z: -1
+                            source: imageBody.imageName ? backend.imageFolder + "/" + imageBody.imageName : ""
+                            fillMode: Image.Stretch
+                            autoTransform: true
+                            asynchronous: true
+                            mipmap: true
+                            // An SVG is drawn large enough to stay sharp when
+                            // it is made big; a photo keeps its own size.
+                            sourceSize: imageBody.imageName.endsWith(".svg") ? Qt.size(2048, 0) : undefined
+                        }
+                        // An image whose file is gone leaves its box.
+                        Shape {
+                            anchors.fill: parent
+                            z: -1
+                            visible: picture.status === Image.Error || picture.status === Image.Null
+                            preferredRendererType: Shape.CurveRenderer
+                            ShapePath {
+                                strokeColor: imageBody.ink
+                                strokeWidth: 2
+                                fillColor: "transparent"
+                                strokeStyle: ShapePath.DashLine
+                                dashPattern: view.dashesOf("dashed")
+                                PathRectangle { x: 1; y: 1; width: imageBody.width - 2; height: imageBody.height - 2 }
                             }
                         }
                     }

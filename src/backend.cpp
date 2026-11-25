@@ -1,10 +1,15 @@
 #include "backend.h"
 
 #include "boardexport.h"
+#include "portalfilepicker.h"
 
+#include <QBuffer>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QImageReader>
+#include <QJsonArray>
 #include <QRegularExpression>
 #include <QFile>
 #include <QJsonDocument>
@@ -37,17 +42,28 @@ Backend::Backend(const QString &directory, QObject *parent)
                       : directory) {
     QDir().mkpath(m_directory);
 
+    QSet<QString> images;
+    bool allRead = true;
     const auto files = QDir(m_directory).entryInfoList({"*.json"}, QDir::Files);
     for (const QFileInfo &file : files) {
         QJsonObject object;
-        if (!readBoard(file.filePath(), &object))
+        if (!readBoard(file.filePath(), &object)) {
+            allRead = false;
             continue;
+        }
+        const QJsonArray items = object.value("items").toArray();
+        for (const QJsonValue &item : items)
+            images.insert(item.toObject().value("image").toString());
         m_boards.append({file.completeBaseName(), object.value("name").toString(),
                          qint64(object.value("created").toDouble())});
     }
     std::sort(m_boards.begin(), m_boards.end(), [](const Info &a, const Info &b) {
         return a.created != b.created ? a.created < b.created : a.id < b.id;
     });
+
+    // A board that could not be read may still need its images.
+    if (allRead)
+        forgetUnusedImages(images);
 
     m_saveTimer.setSingleShot(true);
     m_saveTimer.setInterval(400);
@@ -68,6 +84,77 @@ Backend::Backend(const QString &directory, QObject *parent)
 
 Backend::~Backend() {
     save();
+}
+
+// Images are kept while a board shows them. One taken off its board stays
+// until Slate is next started, so undo can bring it back.
+void Backend::forgetUnusedImages(const QSet<QString> &used) {
+    const auto files = QDir(imagePath()).entryInfoList(QDir::Files);
+    for (const QFileInfo &file : files)
+        if (!used.contains(file.fileName()))
+            QFile::remove(file.filePath());
+}
+
+QString Backend::imageFolder() const {
+    return QUrl::fromLocalFile(imagePath()).toString();
+}
+
+void Backend::setFilePicker(FilePicker *picker) {
+    if (m_picker)
+        m_picker->disconnect(this);
+    m_picker = picker;
+    connect(m_picker, &FilePicker::imagesSelected, this, [this](const QList<QUrl> &urls) {
+        QVariantList list;
+        for (const QUrl &url : urls)
+            list.append(url);
+        emit imagesChosen(list);
+    });
+    connect(m_picker, &FilePicker::failed, this, &Backend::pickFailed);
+}
+
+void Backend::pickImages() {
+    // Made when first asked for, so starting Slate doesn't wait on D-Bus.
+    if (!m_picker)
+        setFilePicker(new PortalFilePicker(this));
+    m_picker->openImages();
+}
+
+QVariantMap Backend::importImage(const QUrl &url) {
+    const QString source = url.toLocalFile();
+    const QVariantMap unread{{"ok", false}, {"file", QFileInfo(source).fileName()}};
+    QFile file(source);
+    if (source.isEmpty() || !file.open(QIODevice::ReadOnly))
+        return unread;
+    QByteArray bytes = file.readAll();
+
+    // What the file is is read from what is in it, not from its name.
+    static const QStringList formats{"png", "jpeg", "webp", "gif", "bmp", "svg"};
+    QBuffer buffer(&bytes);
+    QImageReader reader(&buffer);
+    reader.setAutoTransform(true);
+    const QString format = QString::fromLatin1(reader.format()).toLower();
+    if (!reader.canRead() || !formats.contains(format))
+        return unread;
+    QSize size = reader.size();
+    if (!size.isValid())
+        size = reader.read().size();
+    // A photo taken with the camera on its side is shown turned upright.
+    else if (reader.transformation().testFlag(QImageIOHandler::TransformationRotate90))
+        size.transpose();
+    if (size.isEmpty())
+        return unread;
+
+    const QString name = QString::fromLatin1(QCryptographicHash::hash(bytes, QCryptographicHash::Sha1).toHex())
+                       + "." + format;
+    const QString target = imagePath() + "/" + name;
+    if (!QFileInfo::exists(target)) {
+        QDir().mkpath(imagePath());
+        QSaveFile copy(target);
+        copy.setDirectWriteFallback(false);
+        if (!copy.open(QIODevice::WriteOnly) || copy.write(bytes) != bytes.size() || !copy.commit())
+            return unread;
+    }
+    return {{"ok", true}, {"name", name}, {"width", size.width()}, {"height", size.height()}};
 }
 
 QString Backend::path(const QString &id) const {
@@ -223,6 +310,7 @@ QVariantMap Backend::exportBoard(const QString &format, const QVariantMap &color
     look.foreground = foreground;
     look.light = light;
     look.radius = radius;
+    look.imageFolder = imagePath();
     for (auto it = colors.begin(); it != colors.end(); ++it)
         look.colors.insert(it.key(), it.value().value<QColor>());
 

@@ -1,6 +1,7 @@
 #include "boardexport.h"
 
 #include <QGuiApplication>
+#include <QImageReader>
 #include <QPageSize>
 #include <QFontMetricsF>
 #include <QPainter>
@@ -101,6 +102,33 @@ void paintShape(QPainter &painter, const BoardItem &item, const BoardLook &look)
         QSvgRenderer renderer(svg);
         const double side = std::min(item.w, item.h);
         renderer.render(&painter, QRectF(box.center().x() - side / 2, box.center().y() - side / 2, side, side));
+    } else if (item.kind == QLatin1String("image")) {
+        // Stretched over its box, as the window shows it. An SVG stays
+        // lines and curves in the file; any other is turned as its camera
+        // says it was held.
+        const QString path = look.imageFolder + "/" + item.image;
+        bool drawn = false;
+        if (item.image.endsWith(QLatin1String(".svg"))) {
+            QSvgRenderer renderer(path);
+            drawn = renderer.isValid();
+            if (drawn)
+                renderer.render(&painter, box);
+        } else if (!item.image.isEmpty()) {
+            QImageReader reader(path);
+            reader.setAutoTransform(true);
+            const QImage image = reader.read();
+            drawn = !image.isNull();
+            if (drawn) {
+                painter.setRenderHint(QPainter::SmoothPixmapTransform);
+                painter.drawImage(box, image);
+            }
+        }
+        // An image whose file is gone leaves its box.
+        if (!drawn) {
+            painter.setPen(outlinePen(ink, 2, QStringLiteral("dashed")));
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(box.adjusted(1, 1, -1, -1));
+        }
     } else if (item.kind == QLatin1String("text")) {
         painter.setFont(fontOf(item.fontSize));
         painter.setPen(ink);

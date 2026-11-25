@@ -119,12 +119,51 @@ ApplicationWindow {
     // Saves the board in Downloads, drawn as it is here, and says where.
     property string notice: ""
     property bool noticeFailed: false
+    function say(text, failed) {
+        noticeFailed = failed
+        notice = text
+        noticeTimer.restart()
+    }
     function download(format) {
         const result = backend.exportBoard(format, theme.colors, theme.background, theme.foreground,
                                            theme.light, theme.radius)
-        noticeFailed = !result.ok
-        notice = result.path
-        noticeTimer.restart()
+        say(result.ok ? qsTr("Saved to %1").arg(result.path) : qsTr("Could not save to %1").arg(result.path),
+            !result.ok)
+    }
+
+    // Puts image files on the board: where they were dropped, or in the
+    // middle of what is shown when they were picked in the file dialog,
+    // since the pointer was last on the dialog. Each is as large as it is,
+    // unless that is more than most of the window, and several are fanned
+    // out so none hides another.
+    function addImages(urls, at) {
+        const spot = view.toWorld(at || Qt.point(view.width / 2, view.height / 2))
+        const added = []
+        let unread = ""
+        for (const url of urls) {
+            const image = backend.importImage(url)
+            if (!image.ok) {
+                unread = image.file
+                continue
+            }
+            const fit = Math.min(1, view.width * 0.6 / view.zoom / image.width,
+                                 view.height * 0.6 / view.zoom / image.height)
+            const w = image.width * fit, h = image.height * fit, step = added.length * 24
+            added.push(board.addImage(image.name, spot.x - w / 2 + step, spot.y - h / 2 + step, w, h))
+        }
+        if (added.length > 0) {
+            view.tool = "select"
+            board.selectOnly(added[0])
+            for (const id of added.slice(1))
+                board.toggle(id)
+        }
+        if (unread)
+            say(qsTr("Could not read %1 as an image").arg(unread), true)
+    }
+    Connections {
+        target: backend
+        function onImagesChosen(urls) { win.addImages(urls) }
+        function onPickFailed() { win.say(qsTr("Could not open the file dialog"), true) }
     }
     Timer {
         id: noticeTimer
@@ -152,6 +191,7 @@ ApplicationWindow {
     Shortcut { sequence: "L"; enabled: win.keys; onActivated: view.tool = "line" }
     Shortcut { sequence: "F"; enabled: win.keys; onActivated: view.tool = "frame" }
     Shortcut { sequence: "P"; enabled: win.keys; onActivated: view.tool = "postit" }
+    Shortcut { sequence: "M"; enabled: win.keys; onActivated: backend.pickImages() }
     Shortcut { sequence: "I"; enabled: win.keys; onActivated: iconMenu.visible ? iconMenu.close() : iconMenu.open() }
     Shortcut { sequence: ","; enabled: win.keys; onActivated: board.rotateSelection(-15) }
     Shortcut { sequence: "."; enabled: win.keys; onActivated: board.rotateSelection(15) }
@@ -254,6 +294,17 @@ ApplicationWindow {
             anchors.fill: parent
         }
 
+        // Image files dragged in from the file manager land where they
+        // are let go.
+        DropArea {
+            anchors.fill: view
+            keys: ["text/uri-list"]
+            onDropped: (drop) => {
+                win.addImages(drop.urls, Qt.point(drop.x, drop.y))
+                drop.accept()
+            }
+        }
+
         Label {
             objectName: "hint"
             visible: board.count === 0
@@ -320,6 +371,8 @@ ApplicationWindow {
                           icon: "M3 3 H17 V12 L12 17 H3 Z M17 12 H12 V17" },
                         { tool: "text", key: "X", tip: qsTr("Text"),
                           icon: "M4 5.5 V3.5 H16 V5.5 M10 3.5 V16.5 M7.5 16.5 H12.5" },
+                        { tool: "image", action: true, key: "M", tip: qsTr("Add images"),
+                          icon: "M3 4 H17 V16 H3 Z M3 13.5 L7.5 9.5 L11 12.5 L13.5 10.5 L17 13.5 M12.6 7.5 A0.6 0.6 0 1 0 13.8 7.5 A0.6 0.6 0 1 0 12.6 7.5" },
                         { tool: "connect", menu: "connect", key: "C", tip: qsTr("Connect two shapes") }
                     ]
                     delegate: Rectangle {
@@ -395,7 +448,11 @@ ApplicationWindow {
                         HoverHandler { id: toolHover }
                         TapHandler {
                             onTapped: {
-                                if (!toolButton.popup)
+                                // The image button isn't a tool to draw
+                                // with: it asks for files straight away.
+                                if (toolButton.modelData.action)
+                                    backend.pickImages()
+                                else if (!toolButton.popup)
                                     view.tool = toolButton.modelData.tool
                                 else if (toolButton.popup.visible)
                                     toolButton.popup.close()
@@ -1370,7 +1427,7 @@ ApplicationWindow {
             }
         }
 
-        // Where the file went, or that it couldn't be written.
+        // Where the file went, or what went wrong.
         Rectangle {
             objectName: "notice"
             visible: win.notice !== ""
@@ -1389,8 +1446,7 @@ ApplicationWindow {
                 width: Math.min(implicitWidth, win.width - 64)
                 wrapMode: Text.WrapAnywhere
                 color: win.noticeFailed ? "black" : theme.foreground
-                text: win.noticeFailed ? qsTr("Could not save to %1").arg(win.notice)
-                                       : qsTr("Saved to %1").arg(win.notice)
+                text: win.notice
             }
         }
     }
@@ -1404,6 +1460,7 @@ ApplicationWindow {
             { keys: "F", action: qsTr("Draw a frame; what lies inside it moves with it") },
             { keys: "P", action: qsTr("Stick a post-it") },
             { keys: "I", action: qsTr("Place an icon") },
+            { keys: "M", action: qsTr("Add images from files") },
             { keys: "X · T T", action: qsTr("Write text") },
             { keys: "C", action: qsTr("Connect two shapes") },
             { keys: "V · Esc", action: qsTr("Select and move") },

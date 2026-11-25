@@ -16,6 +16,8 @@ struct BoardLook {
     QHash<QString, QColor> colors;
     bool light = false;
     int radius = 0;
+    // Where the files of the board's images are.
+    QString imageFolder;
 };
 
 // The part of the canvas an exported file shows: everything on the board,

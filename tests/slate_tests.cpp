@@ -1,4 +1,7 @@
 #include <QDir>
+#include <QDropEvent>
+#include <QImage>
+#include <QMimeData>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -22,6 +25,7 @@
 
 #include "backend.h"
 #include "dotgrid.h"
+#include "filepicker.h"
 #include "pinchpan.h"
 #include "theme.h"
 #include "translator.h"
@@ -159,6 +163,17 @@ QMap<QString, bool> translatables(const QString &folder, QStringList *problems) 
 
 // An item by name among what is drawn under another; a popup's content is
 // not among its window's QObject children.
+// The Image on the canvas that shows the file of that name.
+QQuickItem *pictureOf(QQuickItem *item, const QString &name) {
+    if (item->inherits("QQuickImage") && item->property("source").toString().endsWith(name))
+        return item;
+    const auto children = item->childItems();
+    for (QQuickItem *child : children)
+        if (QQuickItem *found = pictureOf(child, name))
+            return found;
+    return nullptr;
+}
+
 QQuickItem *visualChild(QQuickItem *item, const QString &name) {
     if (!item || item->objectName() == name)
         return item;
@@ -169,6 +184,23 @@ QQuickItem *visualChild(QQuickItem *item, const QString &name) {
 }
 
 } // namespace
+
+// Stands in for the desktop's file dialog: it counts how often it is asked,
+// and the test answers for the user.
+class FakePicker : public FilePicker {
+    Q_OBJECT
+
+public:
+    void openImages() override { ++asked; }
+    int asked = 0;
+};
+
+// A small picture of one color, written where the test wants it.
+QString pictureAt(const QString &path, int width, int height, const QColor &color = Qt::red) {
+    QImage image(width, height, QImage::Format_RGB32);
+    image.fill(color);
+    return image.save(path) ? path : QString();
+}
 
 class SlateTests : public QObject {
     Q_OBJECT
@@ -1206,6 +1238,9 @@ private slots:
         board->setText(words, "Loose words");
         board->link(plan, note);
         board->addIcon("star", 500, 300, 64, 64);
+        const QVariantMap photo = backend.importImage(
+            QUrl::fromLocalFile(pictureAt(downloads.path() + "/../photo.png", 40, 30)));
+        QVERIFY(board->addImage(photo.value("name").toString(), 700, 300, 80, 60));
 
         // Named after the board, with what a file name can't hold taken out.
         QVariantMap result = save("pdf");
@@ -1226,18 +1261,24 @@ private slots:
         QVERIFY(drawing.contains("Call Pat"));
         QVERIFY(drawing.contains("Loose words"));
         QVERIFY(drawing.toLower().contains("#7aa2f7"));
+        // The picture is in the file itself.
+        QCOMPARE(drawing.count("<image"), 1);
         QVERIFY(!drawing.contains("stroke-dasharray"));
 
         // A second export never writes over the first, and a dashed outline
         // is dashed in the file too.
         board->selectOnly(plan);
         board->setSelectionStroke("dashed");
+        // An image whose file is gone is saved as its empty box.
+        QVERIFY(board->addImage(QString(40, 'a') + ".png", 700, 100, 80, 60));
         result = save("svg");
         QCOMPARE(result.value("path").toString(), downloads.path() + "/Road-map 2.svg");
         QVERIFY(QFile::exists(downloads.path() + "/Road-map.svg"));
         QFile dashed(result.value("path").toString());
         QVERIFY(dashed.open(QIODevice::ReadOnly));
-        QVERIFY(dashed.readAll().contains("stroke-dasharray"));
+        const QByteArray second = dashed.readAll();
+        QVERIFY(second.contains("stroke-dasharray"));
+        QCOMPARE(second.count("<image"), 1);
 
         // Only what it can write, and only where it can: otherwise it says
         // so and leaves nothing behind.
@@ -1248,6 +1289,130 @@ private slots:
         QVERIFY(QFile::setPermissions(downloads.path(), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
         QVERIFY(!QFile::exists(result.value("path").toString()));
         QCOMPARE(QDir(downloads.path()).entryList(QDir::Files).size(), 3);
+    }
+
+    void imagesAreKeptWithTheBoards() {
+        QTemporaryDir dir, pictures;
+        const QString folder = dir.path() + "/boards/images";
+        const QString photo = pictureAt(pictures.path() + "/photo.png", 100, 60);
+        QVERIFY(!photo.isEmpty());
+        QString name;
+        {
+            Backend backend(dir.path() + "/boards");
+            Board *board = backend.board();
+            QCOMPARE(backend.imageFolder(), QUrl::fromLocalFile(folder).toString());
+
+            // Slate takes its own copy, named after what is in the file,
+            // and says how large the picture is.
+            const QVariantMap image = backend.importImage(QUrl::fromLocalFile(photo));
+            QVERIFY(image.value("ok").toBool());
+            name = image.value("name").toString();
+            QVERIFY(Board::isImageName(name));
+            QVERIFY(name.endsWith(".png"));
+            QCOMPARE(image.value("width").toInt(), 100);
+            QCOMPARE(image.value("height").toInt(), 60);
+            QVERIFY(QFile::exists(folder + "/" + name));
+            // The original is left as it was, and can go.
+            QVERIFY(QFile::remove(photo));
+            QVERIFY(QFile::exists(folder + "/" + name));
+
+            // The same picture under another name is kept once; what a
+            // file is called does not make it one kind of image or another.
+            const QString again = pictureAt(pictures.path() + "/again.png", 100, 60);
+            QVERIFY(QFile::rename(again, pictures.path() + "/again.jpg"));
+            QCOMPARE(backend.importImage(QUrl::fromLocalFile(pictures.path() + "/again.jpg")).value("name").toString(),
+                     name);
+            QCOMPARE(QDir(folder).entryList(QDir::Files).size(), 1);
+
+            // A drawing is an image too.
+            QFile drawing(pictures.path() + "/drawing.svg");
+            QVERIFY(drawing.open(QIODevice::WriteOnly));
+            drawing.write("<svg xmlns='http://www.w3.org/2000/svg' width='40' height='20'>"
+                          "<rect width='40' height='20' fill='blue'/></svg>");
+            drawing.close();
+            const QVariantMap drawn = backend.importImage(QUrl::fromLocalFile(drawing.fileName()));
+            QVERIFY(drawn.value("ok").toBool());
+            QVERIFY(drawn.value("name").toString().endsWith(".svg"));
+            QCOMPARE(drawn.value("width").toInt(), 40);
+
+            // What is no image is not taken, and is named so the window
+            // can say which file it was.
+            QFile notes(pictures.path() + "/notes.png");
+            QVERIFY(notes.open(QIODevice::WriteOnly));
+            notes.write("Not a picture at all");
+            notes.close();
+            const QVariantMap unread = backend.importImage(QUrl::fromLocalFile(notes.fileName()));
+            QVERIFY(!unread.value("ok").toBool());
+            QCOMPARE(unread.value("file").toString(), QString("notes.png"));
+            QVERIFY(!backend.importImage(QUrl::fromLocalFile(pictures.path() + "/missing.png")).value("ok").toBool());
+            QCOMPARE(QDir(folder).entryList(QDir::Files).size(), 2);
+
+            // On the board it is a shape like the others: it is hit in its
+            // box, turned, grouped, and connected to. It takes no color
+            // and no border of the board's.
+            board->setSelectionColor("blue");
+            board->setSelectionStroke("dashed");
+            const int placed = board->addImage(name, 10, 20, 100, 60);
+            QVERIFY(placed);
+            QCOMPARE(board->find(placed)->kind, QString("image"));
+            QCOMPARE(board->find(placed)->image, name);
+            QCOMPARE(board->find(placed)->color, QString());
+            QCOMPARE(board->find(placed)->stroke, QString());
+            QCOMPARE(board->itemAt(60, 50, 0), placed);
+            const int box = board->add("rect", 300, 20, 100, 60);
+            QVERIFY(board->link(placed, box));
+            board->setRotation(placed, 30);
+            QCOMPARE(board->find(placed)->rotation, 30.0);
+            // A board can't be made to show a file from anywhere else.
+            QCOMPARE(board->addImage("../../secret.png", 0, 0, 10, 10), 0);
+            QCOMPARE(board->addImage("photo.png", 0, 0, 10, 10), 0);
+            QVERIFY(backend.save());
+        }
+        {
+            // It is there when the board is opened again, and the picture
+            // no board shows any more has been cleared away.
+            Backend backend(dir.path() + "/boards");
+            Board *board = backend.board();
+            int placed = 0;
+            for (int id = 1; id < 10 && !placed; ++id)
+                if (board->find(id) && board->find(id)->kind == QLatin1String("image"))
+                    placed = id;
+            QVERIFY(placed);
+            QCOMPARE(board->find(placed)->image, name);
+            QCOMPARE(QDir(folder).entryList(QDir::Files), QStringList{name});
+
+            // Taken off the board, its file stays for undo to bring back...
+            board->removeItem(placed);
+            QVERIFY(backend.save());
+            QVERIFY(QFile::exists(folder + "/" + name));
+
+            // The file dialog's answer is passed on to the window.
+            FakePicker picker;
+            backend.setFilePicker(&picker);
+            QSignalSpy chosen(&backend, &Backend::imagesChosen);
+            QSignalSpy failed(&backend, &Backend::pickFailed);
+            backend.pickImages();
+            QCOMPARE(picker.asked, 1);
+            emit picker.imagesSelected({QUrl::fromLocalFile("/a.png"), QUrl::fromLocalFile("/b.png")});
+            QCOMPARE(chosen.size(), 1);
+            QCOMPARE(chosen.first().first().toList().size(), 2);
+            emit picker.failed();
+            QCOMPARE(failed.size(), 1);
+        }
+        // ...until Slate is next started.
+        Backend backend(dir.path() + "/boards");
+        QVERIFY(!QFile::exists(folder + "/" + name));
+
+        // A board that can't be read may still need its images, so none
+        // are cleared away while there is one.
+        const QVariantMap kept = backend.importImage(QUrl::fromLocalFile(pictureAt(pictures.path() + "/kept.png", 8, 8)));
+        QVERIFY(kept.value("ok").toBool());
+        QFile broken(dir.path() + "/boards/broken.json");
+        QVERIFY(broken.open(QIODevice::WriteOnly));
+        broken.write("{ not a board");
+        broken.close();
+        Backend later(dir.path() + "/boards");
+        QVERIFY(QFile::exists(folder + "/" + kept.value("name").toString()));
     }
 
     void deletingTheLastBoardLeavesAnEmptyOne() {
@@ -2464,6 +2629,83 @@ private slots:
         // A Material popup animates out: `opened` drops at once, `visible` after.
         QTest::keyClick(window, Qt::Key_Escape);
         QTRY_VERIFY(!help->property("visible").toBool());
+
+        // M and the picture in the toolbar ask for image files. What is
+        // picked lands in the middle of the view, selected, as large as it
+        // is; several are fanned out.
+        FakePicker picker;
+        backend.setFilePicker(&picker);
+        QTest::keyClick(window, Qt::Key_M);
+        QCOMPARE(picker.asked, 1);
+        auto *imageButton = visualChild(window->contentItem(), "tool-image");
+        QVERIFY(imageButton);
+        QTest::mouseClick(window, Qt::LeftButton, {}, imageButton->mapToScene({21, 21}).toPoint());
+        QCOMPARE(picker.asked, 2);
+        const QString small = pictureAt(dir.path() + "/small.png", 120, 80);
+        const QString other = pictureAt(dir.path() + "/other.png", 60, 60, Qt::blue);
+        int shapesBefore = board->count();
+        emit picker.imagesSelected({QUrl::fromLocalFile(small), QUrl::fromLocalFile(other)});
+        QCOMPARE(board->count(), shapesBefore + 2);
+        QCOMPARE(board->selectionCount(), 2);
+        QCOMPARE(view->property("tool").toString(), QString("select"));
+        const BoardItem *lower = nullptr, *upper = nullptr;
+        // The two newest images, the later one over the earlier.
+        for (int id = 1; id < 10000; ++id) {
+            const BoardItem *item = board->find(id);
+            if (item && item->kind == QLatin1String("image")) {
+                lower = upper;
+                upper = item;
+            }
+        }
+        QVERIFY(lower && upper);
+        const double zoomNow = view->property("zoom").toDouble();
+        const QPointF shown((view->width() / 2 - view->property("camX").toDouble()) / zoomNow,
+                            (view->height() / 2 - view->property("camY").toDouble()) / zoomNow);
+        QVERIFY(std::abs(lower->x + lower->w / 2 - shown.x()) < 0.01);
+        QVERIFY(std::abs(lower->y + lower->h / 2 - shown.y()) < 0.01);
+        QVERIFY(lower->w <= 120 && std::abs(lower->w / lower->h - 1.5) < 0.001);
+        QVERIFY(std::abs(upper->x + upper->w / 2 - shown.x() - 24) < 0.01);
+        // The picture is shown once it has been read.
+        QQuickItem *shownPicture = nullptr;
+        QTRY_VERIFY((shownPicture = pictureOf(view, lower->image)));
+        QTRY_COMPARE(shownPicture->property("status").toInt(), 1);
+        // It is written on no more than an icon is.
+        QTest::keyClick(window, Qt::Key_Escape);
+        board->selectOnly(lower->id);
+        QTest::keyClick(window, Qt::Key_Return);
+        QVERIFY(!view->property("editing").toBool());
+
+        // What is no image is said to be none, and adds nothing.
+        QFile notes(dir.path() + "/notes.png");
+        QVERIFY(notes.open(QIODevice::WriteOnly));
+        notes.write("words");
+        notes.close();
+        shapesBefore = board->count();
+        emit picker.imagesSelected({QUrl::fromLocalFile(notes.fileName())});
+        QCOMPARE(board->count(), shapesBefore);
+        QTRY_VERIFY(noticeLabel->isVisible());
+        QCOMPARE(noticeLabel->property("text").toString(), QString("Could not read notes.png as an image"));
+        emit picker.failed();
+        QCOMPARE(noticeLabel->property("text").toString(), QString("Could not open the file dialog"));
+
+        // A file dragged in from the file manager lands where it is dropped.
+        {
+            QMimeData dragged;
+            dragged.setUrls({QUrl::fromLocalFile(small)});
+            const QPointF at = view->mapToScene({300, 200});
+            QDragEnterEvent enter(at, Qt::CopyAction, &dragged, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(window, &enter);
+            QDragMoveEvent move(at, Qt::CopyAction, &dragged, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(window, &move);
+            QDropEvent drop(at, Qt::CopyAction, &dragged, Qt::LeftButton, Qt::NoModifier);
+            QCoreApplication::sendEvent(window, &drop);
+            QCOMPARE(board->count(), shapesBefore + 1);
+            const BoardItem *dropped = board->find(board->selectedId());
+            QVERIFY(dropped && dropped->kind == QLatin1String("image"));
+            const double z = view->property("zoom").toDouble();
+            QVERIFY(std::abs(dropped->x + dropped->w / 2 - (300 - view->property("camX").toDouble()) / z) < 1);
+            QVERIFY(std::abs(dropped->y + dropped->h / 2 - (200 - view->property("camY").toDouble()) / z) < 1);
+        }
 
         QVERIFY2(warnings.isEmpty(), qPrintable(warnings.join('\n')));
         QCoreApplication::removeTranslator(&translator);

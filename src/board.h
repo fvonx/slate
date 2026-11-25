@@ -15,12 +15,13 @@
 // ends are worked out from where they are now.
 struct BoardItem {
     int id = 0;
-    QString kind; // rect, ellipse, triangle, rhombus, arrow, postit, icon, frame, text, line, connector
+    QString kind; // rect, ellipse, triangle, rhombus, arrow, postit, icon, image, frame, text, line, connector
     double x = 0, y = 0, w = 0, h = 0;
     QString text;
     QString color; // a theme palette key, or empty for the foreground
     QString stroke; // how the outline is drawn: empty for solid, dashed, or dotted
     QString icon; // which icon, for an icon
+    QString image; // which file in the image folder, for an image
     int fontSize = 24;
     double rotation = 0; // degrees, about the middle of its box
     int from = 0, to = 0;
@@ -41,7 +42,7 @@ struct BoardItem {
     }
     bool operator==(const BoardItem &o) const {
         return id == o.id && kind == o.kind && x == o.x && y == o.y && w == o.w && h == o.h && text == o.text
-            && color == o.color && stroke == o.stroke && icon == o.icon && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to && arrow == o.arrow && group == o.group;
+            && color == o.color && stroke == o.stroke && icon == o.icon && image == o.image && fontSize == o.fontSize && rotation == o.rotation && from == o.from && to == o.to && arrow == o.arrow && group == o.group;
     }
 };
 
@@ -79,7 +80,7 @@ class Board : public QAbstractListModel {
 public:
     enum Role {
         IdRole = Qt::UserRole + 1, KindRole, XRole, YRole, WRole, HRole, LabelRole, FillRole, FontSizeRole,
-        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole, StrokeRole, ArrowRole
+        SelectedRole, X1Role, Y1Role, X2Role, Y2Role, RotationRole, IconRole, ImageRole, StrokeRole, ArrowRole
     };
 
     explicit Board(QObject *parent = nullptr);
@@ -139,6 +140,10 @@ public:
     // setText, setFontSize) don't: the window checkpoints once as it starts.
     Q_INVOKABLE int add(const QString &kind, double x, double y, double w, double h);
     Q_INVOKABLE int addIcon(const QString &name, double x, double y, double w, double h);
+    // An image is a file in the image folder, named after what is in it.
+    // Only such a name is taken, so a board can't point anywhere else.
+    Q_INVOKABLE int addImage(const QString &name, double x, double y, double w, double h);
+    static bool isImageName(const QString &name);
     Q_INVOKABLE int link(int from, int to);
     Q_INVOKABLE int linkToNew(int from, double x, double y);
     Q_INVOKABLE void setGeometry(int id, double x, double y, double w, double h);
