@@ -2675,6 +2675,71 @@ private slots:
         QTest::keyClick(window, Qt::Key_Return);
         QVERIFY(!view->property("editing").toBool());
 
+        // Space, pressed and let go, shows the selected image large over
+        // the board: as large as it is, not as it was sized on the canvas.
+        auto *preview = window->findChild<QObject *>("preview");
+        QVERIFY(preview);
+        board->setGeometry(lower->id, lower->x, lower->y, 30, 20);
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(preview->property("opened").toBool());
+        auto *enlarged = visualChild(preview->property("contentItem").value<QQuickItem *>(), "previewImage");
+        QVERIFY(enlarged);
+        QVERIFY(enlarged->property("source").toString().endsWith(lower->image));
+        QTRY_COMPARE(enlarged->property("status").toInt(), 1);
+        QCOMPARE(enlarged->width(), 120.0);
+        QCOMPARE(enlarged->height(), 80.0);
+        // The board's keys wait while it is shown.
+        shapesBefore = board->count();
+        QTest::keyClick(window, Qt::Key_Delete);
+        QCOMPARE(board->count(), shapesBefore);
+        // Space puts it away again, and so does Escape or a click.
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(!preview->property("visible").toBool());
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(preview->property("opened").toBool());
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!preview->property("visible").toBool());
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(preview->property("opened").toBool());
+        QTest::mouseClick(window, Qt::LeftButton, {}, {20, 20});
+        QTRY_VERIFY(!preview->property("visible").toBool());
+        QCOMPARE(board->selectedId(), lower->id);
+        // A drag with Space held still pans, and shows nothing.
+        {
+            const double camBefore = view->property("camX").toDouble();
+            const QPoint from = view->mapToScene({400, 500}).toPoint();
+            QTest::keyPress(window, Qt::Key_Space);
+            QTest::mousePress(window, Qt::LeftButton, {}, from);
+            QTest::mouseMove(window, from + QPoint(40, 0));
+            QTest::mouseRelease(window, Qt::LeftButton, {}, from + QPoint(40, 0));
+            QTest::keyRelease(window, Qt::Key_Space);
+            QCOMPARE(view->property("camX").toDouble(), camBefore + 40);
+            QVERIFY(!preview->property("opened").toBool());
+        }
+        // Only an image selected alone is shown.
+        board->selectOnly(lower->id);
+        board->toggle(upper->id);
+        QTest::keyClick(window, Qt::Key_Space);
+        board->clearSelection();
+        QTest::keyClick(window, Qt::Key_Space);
+        QVERIFY(!preview->property("opened").toBool());
+        // One whose file is gone says so.
+        const int lost = board->addImage(QString(40, 'b') + ".png", 900, 900, 80, 60);
+        QVERIFY(lost);
+        board->selectOnly(lost);
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(preview->property("opened").toBool());
+        auto *previewError = visualChild(preview->property("contentItem").value<QQuickItem *>(), "previewError");
+        QVERIFY(previewError);
+        QTRY_VERIFY(previewError->isVisible());
+        QCOMPARE(previewError->property("text").toString(), QString("Could not read this image"));
+        QTest::keyClick(window, Qt::Key_Space);
+        QTRY_VERIFY(!preview->property("visible").toBool());
+        board->removeSelection();
+        // The engine says so too, once for the canvas and once for the
+        // preview; that is the one warning this is allowed.
+        warnings.removeIf([](const QString &warning) { return warning.contains(QString(40, 'b') + ".png"); });
+
         // What is no image is said to be none, and adds nothing.
         QFile notes(dir.path() + "/notes.png");
         QVERIFY(notes.open(QIODevice::WriteOnly));

@@ -22,7 +22,7 @@ ApplicationWindow {
     readonly property bool rightToLeft: Qt.application.layoutDirection === Qt.RightToLeft
     // Bare keys belong to whatever is being typed into.
     readonly property bool typing: activeFocusItem instanceof TextInput || activeFocusItem instanceof TextEdit
-    readonly property bool keys: !typing && !help.visible && !confirm.visible
+    readonly property bool keys: !typing && !help.visible && !confirm.visible && !preview.visible
     readonly property color panel: Qt.tint(theme.background, Qt.alpha(theme.foreground, 0.05))
     readonly property var swatches: ["", "red", "orange", "yellow", "green", "cyan", "blue", "magenta"]
 
@@ -56,6 +56,7 @@ ApplicationWindow {
             if (win.drawingShape)
                 win.lastShape = view.tool
         }
+        function onSpaceTapped() { win.lookAtImage() }
     }
 
     property string renamingId: ""
@@ -171,13 +172,23 @@ ApplicationWindow {
         onTriggered: win.notice = ""
     }
 
+    // Shows the selected image large, over the board, so that seeing it
+    // properly doesn't take zooming in on it and back out.
+    function lookAtImage() {
+        const it = board.selectedId ? board.item(board.selectedId) : null
+        if (!it || it.kind !== "image")
+            return
+        preview.imageName = it.image
+        preview.open()
+    }
+
     function askToDelete(id, name) {
         confirm.boardId = id
         confirm.boardName = name
         confirm.open()
     }
 
-    Shortcut { sequence: "?"; enabled: !win.typing && !confirm.visible; onActivated: help.opened ? help.close() : help.open() }
+    Shortcut { sequence: "?"; enabled: !win.typing && !confirm.visible && !preview.visible; onActivated: help.opened ? help.close() : help.open() }
     Shortcut { sequence: "Q"; enabled: win.keys; onActivated: Qt.quit() }
 
     Shortcut { sequence: "V"; enabled: win.keys; onActivated: view.tool = "select" }
@@ -1486,6 +1497,7 @@ ApplicationWindow {
             { keys: "+  −  0", action: qsTr("Zoom in, out, and back to 100%") },
             { keys: "Shift+F", action: qsTr("Fit everything in the window") },
             { keys: "Space", action: qsTr("Hold and drag to pan") },
+            { keys: "Space", action: qsTr("Look at the selected image up close") },
             { keys: "B", action: qsTr("Show or hide the boards") },
             { keys: "Ctrl+N", action: qsTr("New board") },
             { keys: "Ctrl+Tab", action: qsTr("Next board") },
@@ -1543,6 +1555,72 @@ ApplicationWindow {
                         text: modelData.action
                     }
                 }
+            }
+        }
+    }
+
+    // The selected image, as large as it is or as the window has room for.
+    // Space, Escape, or a click anywhere puts it away.
+    Popup {
+        id: preview
+        objectName: "preview"
+        property string imageName: ""
+        readonly property real room: 48
+        Overlay.modal: Rectangle { color: Qt.alpha("black", 0.75) }
+        parent: Overlay.overlay
+        width: win.width
+        height: win.height
+        modal: true
+        focus: true
+        padding: 0
+        closePolicy: Popup.CloseOnEscape
+        background: Item {}
+
+        contentItem: Item {
+            // Space that opens the preview is a tap on the canvas, which
+            // pans with the same key; the one that closes it has nothing
+            // to share it with. It lives in here because a modal popup
+            // keeps the window's own shortcuts from firing.
+            Shortcut { sequence: "Space"; enabled: preview.visible; onActivated: preview.close() }
+
+            Image {
+                id: enlarged
+                objectName: "previewImage"
+                readonly property real roomAcross: Math.max(1, preview.width - 2 * preview.room)
+                readonly property real roomDown: Math.max(1, preview.height - 2 * preview.room)
+                // A photo is not made larger than it is, which would only
+                // blur it; one too large for the window is made to fit.
+                readonly property real fit: implicitWidth > 0 && implicitHeight > 0
+                                            ? Math.min(1, roomAcross / implicitWidth, roomDown / implicitHeight) : 1
+                anchors.centerIn: parent
+                width: implicitWidth * fit
+                height: implicitHeight * fit
+                // Held only while it is shown, so a large photo isn't kept
+                // in memory twice for as long as the board is open.
+                source: preview.visible && preview.imageName ? backend.imageFolder + "/" + preview.imageName : ""
+                autoTransform: true
+                asynchronous: true
+                mipmap: true
+                // A drawing has no size of its own to speak of, and is
+                // drawn as wide as there is room for.
+                sourceSize: preview.imageName.endsWith(".svg") ? Qt.size(roomAcross, 0) : undefined
+            }
+            // An image whose file is gone is said to be, not shown as nothing.
+            Label {
+                objectName: "previewError"
+                visible: enlarged.status === Image.Error
+                anchors.centerIn: parent
+                width: Math.min(implicitWidth, parent.width - 2 * preview.room)
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                color: "white"
+                font.pixelSize: 16
+                text: qsTr("Could not read this image")
+            }
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.AllButtons
+                onClicked: preview.close()
             }
         }
     }

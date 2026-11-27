@@ -13,7 +13,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 - **Draw**: `R`, `O`, `T`, `D`, or `L`, then drag; the same five are in the toolbar's shapes menu. A click instead of a drag drops the shape at a comfortable size. Hold Shift for a square, a true circle, or a straight line (level, upright, or at 45°); Shift on a line's end keeps it straight too.
 - **Frames**: `F`, or the shapes menu, and drag to draw a frame: a named area that holds what lies inside it. Move the frame, by its name or once it is selected, and everything in it moves along; delete or copy it and its contents go too. Double-click the name to rename it. A drag inside a frame that isn't selected draws a selection band, and a click there selects the frame.
 - **Icons**: `I` opens a menu of icons (star, check, warning, idea, person, clock and more); pick one and click or drag on the canvas. Icons move, size, turn, color, and connect like any other shape.
-- **Images**: `M`, or the picture in the toolbar, asks for image files (PNG, JPEG, WebP, GIF, BMP, SVG) and puts them in the middle of the view; files dragged in from the file manager land where you drop them. An image moves, resizes, turns, groups, and lines up like any shape, and connections attach to it. Slate keeps its own copy, in `~/.local/share/slate/boards/images`, so the board still shows it when the original is moved or deleted.
+- **Images**: `M`, or the picture in the toolbar, asks for image files (PNG, JPEG, WebP, GIF, BMP, SVG) and puts them in the middle of the view; files dragged in from the file manager land where you drop them. An image moves, resizes, turns, groups, and lines up like any shape, and connections attach to it. Slate keeps its own copy, in `~/.local/share/slate/boards/images`, so the board still shows it when the original is moved or deleted. Tap `Space` with an image selected to look at it large over the board, at its own size or as large as the window has room for; `Space`, `Esc`, or a click puts it away.
 - **Post-its**: `P` and a click sticks one under the pointer, ready to type on.
 - **Resize**: drag a corner of the selected shape, or the outline of any shape, selected or not, to change just its width or its height. The pointer turns into a resize arrow wherever that works. Hold Shift to keep the shape's proportions. With several shapes selected, the box around them resizes them all together.
 - **Turn**: hold `Alt` and drag any handle of the selected shape to rotate it. It catches on every 45° and on the angle of any other shape, and shows the angle beside the pointer. Shift turns in steps of 15°, `Ctrl` turns freely, and `,` and `.` turn from the keyboard.
@@ -55,6 +55,7 @@ Press a key, drag, done. Drawing a shape drops you back into selecting, so the n
 | `+` `-` `0` | Zoom in, out, and back to 100% |
 | `Shift+F` | Fit everything in the window |
 | `Space` | Hold and drag to pan |
+| `Space` | Tap with an image selected to see it large; again, or `Esc`, to put it away |
 | `B` | Open the boards menu at the top left |
 | `Ctrl+N` | New board |
 | `Ctrl+Tab` | Next board |

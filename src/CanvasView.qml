@@ -22,6 +22,11 @@ Item {
     readonly property real maxZoom: 8
 
     property bool spaceHeld: false
+    // Space pressed and let go without a drag in between is a tap, which
+    // the window takes as a wish to look at the selected image; with a
+    // drag it pans, and is no tap.
+    property bool spaceTap: false
+    signal spaceTapped()
     property point pointer: Qt.point(width / 2, height / 2)
     property bool pointerInside: false
 
@@ -554,6 +559,7 @@ Item {
         const p = toWorld(pointer)
         pressWorld = p
         if (m.button !== Qt.LeftButton || spaceHeld) {
+            spaceTap = false
             mode = "pan"
             return
         }
@@ -946,6 +952,7 @@ Item {
     Keys.onPressed: (event) => {
         if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
             spaceHeld = true
+            spaceTap = true
             event.accepted = true
         } else if (event.key === Qt.Key_Alt) {
             altHeld = true
@@ -954,6 +961,12 @@ Item {
     Keys.onReleased: (event) => {
         if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
             spaceHeld = false
+            // Only a press that began here counts: the Space that closed
+            // the preview is let go over the canvas too.
+            const tapped = spaceTap
+            spaceTap = false
+            if (tapped)
+                spaceTapped()
             event.accepted = true
         } else if (event.key === Qt.Key_Alt) {
             altHeld = false
@@ -962,6 +975,7 @@ Item {
     onActiveFocusChanged: {
         if (!activeFocus) {
             spaceHeld = false
+            spaceTap = false
             altHeld = false
         }
     }
